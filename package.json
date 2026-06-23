@@ -1,0 +1,22 @@
+{
+  "name": "sports-affpapa",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon  server.js",
+    "seed": "node prisma/manual_seeds.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.5.0",
+    "@prisma/client": "^7.5.0",
+    "axios": "^1.18.1",
+    "express": "^5.2.1",
+    "pg": "^8.22.0",
+    "prisma": "^7.8.0"
+  }
+}

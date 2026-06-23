@@ -1,0 +1,175 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Sport {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique
+  api_provider String
+  id_api       String
+  slug         String   @unique
+  is_active    Boolean
+  created_at   DateTime @default(now())
+
+  // Relations
+  leagues League[]
+  teams   Team[]
+  markets Market[]
+
+  @@map("SPORT")
+}
+
+model League {
+  id         Int      @id @default(autoincrement())
+  sport_id   Int
+  name       String
+  country    String?
+  id_api     String
+  slug       String   @unique
+  is_active  Boolean
+  created_at DateTime @default(now())
+
+  // Relations
+  sport   Sport    @relation(fields: [sport_id], references: [id])
+  seasons Season[]
+
+  @@map("LEAGUE")
+}
+
+model Season {
+  id         Int       @id @default(autoincrement())
+  league_id  Int
+  year       String
+  start_date DateTime?
+  end_date   DateTime?
+  is_current Boolean
+  id_api     String
+
+  // Relations
+  league             League              @relation(fields: [league_id], references: [id])
+  matches            Match[]
+  teamSeasonAverages TeamSeasonAverage[]
+  teamStreaks        TeamStreak[]
+
+  @@map("SEASON")
+}
+
+model Team {
+  id         Int     @id @default(autoincrement())
+  sport_id   Int
+  name       String
+  short_name String?
+  logo_url   String?
+  id_api     String
+  country    String?
+  is_active  Boolean
+
+  // Relations
+  sport              Sport               @relation(fields: [sport_id], references: [id])
+  homeMatches        Match[]             @relation("HomeTeamMatches")
+  awayMatches        Match[]             @relation("AwayTeamMatches")
+  wonMatches         Match[]             @relation("WinnerTeamMatches")
+  matchTeamStats     MatchTeamStat[]
+  teamSeasonAverages TeamSeasonAverage[]
+  teamStreaks        TeamStreak[]
+
+  @@map("TEAM")
+}
+
+model Match {
+  id             Int       @id @default(autoincrement())
+  season_id      Int
+  home_team_id   Int
+  away_team_id   Int
+  matchday       Int?
+  kickoff_at     DateTime?
+  status         String
+  home_score     Int?
+  away_score     Int?
+  winner_team_id Int?
+  id_api         String    @unique
+  venue          String?
+  fetched_at     DateTime  @default(now())
+
+  // Relations
+  season     Season          @relation(fields: [season_id], references: [id])
+  homeTeam   Team            @relation("HomeTeamMatches", fields: [home_team_id], references: [id])
+  awayTeam   Team            @relation("AwayTeamMatches", fields: [away_team_id], references: [id])
+  winnerTeam Team?           @relation("WinnerTeamMatches", fields: [winner_team_id], references: [id])
+  stats      MatchTeamStat[]
+
+  @@map("MATCH")
+}
+
+model Market {
+  id          Int     @id @default(autoincrement())
+  sport_id    Int
+  name        String
+  slug        String  @unique
+  scope       String
+  description String?
+
+  // Relations
+  sport              Sport               @relation(fields: [sport_id], references: [id])
+  matchTeamStats     MatchTeamStat[]
+  teamSeasonAverages TeamSeasonAverage[]
+  teamStreaks        TeamStreak[]
+
+  @@map("MARKET")
+}
+
+model MatchTeamStat {
+  id        Int     @id @default(autoincrement())
+  match_id  Int
+  team_id   Int
+  market_id Int
+  value     Decimal
+  side      String
+
+  // Relations
+  match  Match  @relation(fields: [match_id], references: [id])
+  team   Team   @relation(fields: [team_id], references: [id])
+  market Market @relation(fields: [market_id], references: [id])
+
+  @@map("MATCH_TEAM_STAT")
+}
+
+model TeamSeasonAverage {
+  id              Int      @id @default(autoincrement())
+  team_id         Int
+  season_id       Int
+  market_id       Int
+  avg_value       Decimal
+  avg_value_home  Decimal?
+  avg_value_away  Decimal?
+  matches_played  Int
+  recalculated_at DateTime @updatedAt
+
+  // Relations
+  team   Team   @relation(fields: [team_id], references: [id])
+  season Season @relation(fields: [season_id], references: [id])
+  market Market @relation(fields: [market_id], references: [id])
+
+  @@map("TEAM_SEASON_AVERAGE")
+}
+
+model TeamStreak {
+  id               Int      @id @default(autoincrement())
+  team_id          Int
+  season_id        Int
+  market_id        Int
+  streak_length    Int
+  streak_direction String
+  recalculated_at  DateTime @updatedAt
+
+  // Relations
+  team   Team   @relation(fields: [team_id], references: [id])
+  season Season @relation(fields: [season_id], references: [id])
+  market Market @relation(fields: [market_id], references: [id])
+
+  @@map("TEAM_STREAK")
+}
