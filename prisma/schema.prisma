@@ -55,6 +55,7 @@ model Season {
   teamSeasonAverages TeamSeasonAverage[]
   teamStreaks        TeamStreak[]
 
+  @@unique([league_id, id_api], name: "id_api_league_id") //new
   @@map("SEASON")
 }
 
@@ -64,7 +65,7 @@ model Team {
   name       String
   short_name String?
   logo_url   String?
-  id_api     String
+  id_api     String  @unique
   country    String?
   is_active  Boolean
 
@@ -135,6 +136,7 @@ model MatchTeamStat {
   team   Team   @relation(fields: [team_id], references: [id])
   market Market @relation(fields: [market_id], references: [id])
 
+  @@unique([match_id, team_id, market_id])
   @@map("MATCH_TEAM_STAT")
 }
 

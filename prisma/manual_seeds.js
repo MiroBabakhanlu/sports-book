@@ -17,19 +17,19 @@ async function main() {
     const coreMarkets = [
         // Goals
         { name: 'Team Goals', slug: 'team-goals', scope: 'team', description: 'Total goals scored by a specific team' },
-        { name: 'Total Goals', slug: 'total-goals', scope: 'match', description: 'Combined goals scored by both teams in the match' },
+        { name: 'Total Goals', slug: 'total-goals', scope: 'team', description: 'Combined goals scored by both teams in the match' },
 
         // Yellow Cards
         { name: 'Team Yellow Cards', slug: 'team-yellow-cards', scope: 'team', description: 'Total yellow cards received by a specific team' },
-        { name: 'Total Yellow Cards', slug: 'total-yellow-cards', scope: 'match', description: 'Combined yellow cards issued to both teams in the match' },
+        { name: 'Total Yellow Cards', slug: 'total-yellow-cards', scope: 'team', description: 'Combined yellow cards issued to both teams in the match' },
 
         // Red Cards
         { name: 'Team Red Cards', slug: 'team-red-cards', scope: 'team', description: 'Total red cards received by a specific team' },
-        { name: 'Total Red Cards', slug: 'total-red-cards', scope: 'match', description: 'Combined red cards issued to both teams in the match' },
+        { name: 'Total Red Cards', slug: 'total-red-cards', scope: 'team', description: 'Combined red cards issued to both teams in the match' },
 
         // Corner Kicks
         { name: 'Team Corner Kicks', slug: 'team-corner-kicks', scope: 'team', description: 'Total corner kicks taken by a specific team' },
-        { name: 'Total Corner Kicks', slug: 'total-total-clicks', scope: 'match', description: 'Combined corner kicks taken by both teams in the match' }
+        { name: 'Total Corner Kicks', slug: 'total-corner-kicks', scope: 'team', description: 'Combined corner kicks taken by both teams in the match' }
     ];
 
     for (const market of coreMarkets) {
@@ -46,12 +46,12 @@ async function main() {
         });
     }
 
-    console.log('✅ Manual seeding completed successfully!');
+    console.log('Manual seeding completed successfully');
 }
 
 main()
     .catch((e) => {
-        console.error('❌ Error during seeding:', e);
+        console.error('Error during seeding:', e);
         process.exit(1);
     })
     .finally(async () => {
