@@ -35,6 +35,7 @@ const teamsServices = {
             if (m.awayTeam) teamMap.set(m.awayTeam.id, m.awayTeam);
         });
 
+        console.log('Unique teams for season', Array.from(teamMap.values()).map(t => t.name));
         return Array.from(teamMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     },
 
@@ -172,7 +173,7 @@ const teamsServices = {
             };
         });
 
-        console.log('formattedMatches:', averagesWithTotals);
+        // console.log('formattedMatches:', averagesWithTotals);
 
         return { averages: averagesWithTotals, matches: formattedMatches };
     }

@@ -4,6 +4,9 @@ const path = require('path');
 const { connectDB } = require('./src/utils/prisma');
 const errorMiddleware = require('./src/middlewares/errorMiddleware');
 const teamsRoutes = require('./src/routes/team.routes');
+const { runPipelines } = require('./pop-db');
+
+
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -16,10 +19,19 @@ app.use('/api/teams', teamsRoutes);
 
 
 const port = process.env.PORT || 8080;
+const targetLeagues = [
+    [140, 2025],
+    [39, 2026],
+    [39, 2020],
+    [135, 2025],
+    [253, 2026]
+];
+
 app.use(errorMiddleware);
 app.listen(port, async () => {
     try {
         await connectDB();
+        runPipelines(targetLeagues)
     } catch (err) {
         console.error('Shutting down server due to DB connection failure');
         process.exit(1);

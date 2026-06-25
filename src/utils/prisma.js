@@ -2,15 +2,24 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const { PrismaClient } = require('@prisma/client');
-const { PrismaNeon } = require('@prisma/adapter-neon');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { Pool } = require('pg');
 
 const connectionString = process.env.DATABASE_URL?.trim();
 
 if (!connectionString) {
-    throw new Error('❌ DATABASE_URL is missing in environment variables');
+    throw new Error('DATABASE_URL is missing in environment variables');
 }
 
-const adapter = new PrismaNeon({ connectionString });
+
+const pool = new Pool({
+    connectionString,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
+});
+
+const adapter = new PrismaPg(pool);
 
 const prisma = new PrismaClient({
     adapter,
@@ -22,9 +31,10 @@ const prisma = new PrismaClient({
 async function connectDB() {
     try {
         await prisma.$connect();
-        console.log('✅ Connected to Neon database successfully');
+        console.log('Connected to Railway PostgreSQL database successfully');
     } catch (error) {
-        console.error('❌ Database connection failed:', error.message);
+        console.error(' Database connection failed:', error.message);
+        console.error('Connection string:', connectionString.replace(/:[^@]*@/, ':***@'));
         throw error;
     }
 }
@@ -32,9 +42,10 @@ async function connectDB() {
 async function disconnectDB() {
     try {
         await prisma.$disconnect();
-        console.log('👋 Disconnected from Neon database successfully');
+        await pool.end();
+        console.log(' Disconnected from Railway database successfully');
     } catch (error) {
-        console.error('❌ Error disconnecting:', error.message);
+        console.error('Error disconnecting:', error.message);
     }
 }
 
