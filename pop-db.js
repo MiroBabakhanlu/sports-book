@@ -56,12 +56,18 @@ async function runCompletePipeline(leagueId, seasonYear) {
                     league_id: dbLeague.id
                 }
             },
-            update: { is_current: currentSeason.current },
+            update: {
+                is_current: currentSeason.current,
+                start_date: new Date(currentSeason.start),
+                end_date: new Date(currentSeason.end)
+            },
             create: {
                 league_id: dbLeague.id,
                 year: String(currentSeason.year),
                 is_current: currentSeason.current,
-                id_api: String(currentSeason.year)
+                id_api: String(currentSeason.year),
+                start_date: new Date(currentSeason.start),
+                end_date: new Date(currentSeason.end)
             }
         });
         console.log(`League & Season Are done.`);
@@ -108,7 +114,7 @@ async function runCompletePipeline(leagueId, seasonYear) {
         console.log('Fetching fixtures');
         const fixturesResponse = await axios.get(`${BASE_URL}/fixtures`, {
             headers: { 'x-apisports-key': API_KEY },
-            params: { league: leagueId, season: seasonYear, status: 'FT' }
+            params: { league: leagueId, season: seasonYear } //, status: 'FT'
         });
 
         const baseFixtures = fixturesResponse.data.response || [];
@@ -139,13 +145,31 @@ async function runCompletePipeline(leagueId, seasonYear) {
                     continue;
                 }
 
+                let winnerTeamId = null;
+                const matchStatus = f.fixture.status.short;
+                const isFinished = ['FT', 'AET', 'PEN'].includes(matchStatus);
+
+                if (isFinished) {
+                    if (f.goals.home > f.goals.away) {
+                        winnerTeamId = homeTeam.id;
+                    } else if (f.goals.away > f.goals.home) {
+                        winnerTeamId = awayTeam.id;
+                    } else if (matchStatus === 'PEN' && f.score?.penalty) {
+                        const penHome = f.score.penalty.home ?? 0;
+                        const penAway = f.score.penalty.away ?? 0;
+
+                        if (penHome > penAway) winnerTeamId = homeTeam.id;
+                        else if (penAway > penHome) winnerTeamId = awayTeam.id;
+                    }
+                }
                 // upserting match record
                 const match = await prisma.match.upsert({
                     where: { id_api: apiMatchId },
                     update: {
                         home_score: f.goals.home,
                         away_score: f.goals.away,
-                        status: f.fixture.status.short
+                        status: f.fixture.status.short,
+                        winner_team_id: winnerTeamId
                     },
                     create: {
                         id_api: apiMatchId,
@@ -157,7 +181,8 @@ async function runCompletePipeline(leagueId, seasonYear) {
                         status: f.fixture.status.short,
                         home_score: f.goals.home,
                         away_score: f.goals.away,
-                        venue: f.fixture.venue.name
+                        venue: f.fixture.venue.name,
+                        winner_team_id: winnerTeamId
                     }
                 });
 
@@ -320,5 +345,12 @@ async function generateSeasonAverages(seasonId) {
     console.log('team season averages successfully computed and saved');
 }
 
-// runCompletePipeline(140, 2025);
-runCompletePipeline(135, 2025);
+// runCompletePipeline(140, 2026);
+// runCompletePipeline(39, 2026);
+// runCompletePipeline(39, 2020);
+// runCompletePipeline(39, 2025);
+// runCompletePipeline(135, 2025);
+// runCompletePipeline(253, 2026);
+// runCompletePipeline(71, 2025);
+// runCompletePipeline(98, 2025);
+// runCompletePipeline(128, 2025);

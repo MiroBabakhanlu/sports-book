@@ -2,25 +2,44 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const { PrismaClient } = require('@prisma/client');
-const { PrismaPg } = require('@prisma/adapter-pg');
-const { Pool } = require('pg');
+const { PrismaNeon } = require('@prisma/adapter-neon');
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
+const connectionString = process.env.DATABASE_URL?.trim();
 
-const prisma = new PrismaClient({ adapter });
+if (!connectionString) {
+    throw new Error('❌ DATABASE_URL is missing in environment variables');
+}
+
+const adapter = new PrismaNeon({ connectionString });
+
+const prisma = new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === 'development'
+        ? ['query', 'error', 'warn']
+        : ['error'],
+});
 
 async function connectDB() {
     try {
         await prisma.$connect();
-        console.log('Connected to the database successfully');
+        console.log('✅ Connected to Neon database successfully');
     } catch (error) {
-        console.error(' Database connection failed:', error.message);
+        console.error('❌ Database connection failed:', error.message);
         throw error;
+    }
+}
+
+async function disconnectDB() {
+    try {
+        await prisma.$disconnect();
+        console.log('👋 Disconnected from Neon database successfully');
+    } catch (error) {
+        console.error('❌ Error disconnecting:', error.message);
     }
 }
 
 module.exports = {
     prisma,
-    connectDB
+    connectDB,
+    disconnectDB
 };
