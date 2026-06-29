@@ -28,7 +28,7 @@ model League {
   sport_id   Int
   name       String
   country    String?
-  id_api     String
+  id_api     String   @unique
   slug       String   @unique
   is_active  Boolean
   created_at DateTime @default(now())
@@ -102,25 +102,46 @@ model Match {
   awayTeam   Team            @relation("AwayTeamMatches", fields: [away_team_id], references: [id])
   winnerTeam Team?           @relation("WinnerTeamMatches", fields: [winner_team_id], references: [id])
   stats      MatchTeamStat[]
+  matchOdds  MatchOdds[]
 
   @@map("MATCH")
 }
 
 model Market {
-  id          Int     @id @default(autoincrement())
-  sport_id    Int
-  name        String
-  slug        String  @unique
-  scope       String
-  description String?
-
+  id                 Int                 @id @default(autoincrement())
+  sport_id           Int
+  name               String
+  slug               String              @unique
+  scope              String
+  description        String?
+  id_api             String?             @unique
   // Relations
   sport              Sport               @relation(fields: [sport_id], references: [id])
   matchTeamStats     MatchTeamStat[]
   teamSeasonAverages TeamSeasonAverage[]
   teamStreaks        TeamStreak[]
+  matchOdds          MatchOdds[]
 
   @@map("MARKET")
+}
+
+model MatchOdds {
+  id             Int      @id @default(autoincrement())
+  match_id       Int
+  market_id      Int
+  bookmaker_name String // e.g., "Bet365", "10Bet" - No extra table needed!
+  slug           String // e.g., "over-2-5", "under-2-5", "home", "away"
+  odd            Decimal // The actual decimal value (e.g., 1.95)
+  fetched_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  // Relations
+  match  Match  @relation(fields: [match_id], references: [id])
+  market Market @relation(fields: [market_id], references: [id])
+
+  // Simple unique constraint to prevent duplicate lines for the same match
+  @@unique([match_id, market_id, bookmaker_name, slug], name: "match_market_bookmaker_slug")
+  @@map("MATCH_ODDS")
 }
 
 model MatchTeamStat {
@@ -173,5 +194,6 @@ model TeamStreak {
   season Season @relation(fields: [season_id], references: [id])
   market Market @relation(fields: [market_id], references: [id])
 
+  @@unique([team_id, season_id, market_id], name: "team_id_season_id_market_id")
   @@map("TEAM_STREAK")
 }

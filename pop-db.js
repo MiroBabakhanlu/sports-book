@@ -36,7 +36,12 @@ async function upsertMatchStat(tx, matchId, teamId, marketId, value, side) {
 // 2. Helper function now accepts the transaction client (tx)
 async function generateSeasonAverages(tx, seasonId) {
     const stats = await tx.matchTeamStat.findMany({
-        where: { match: { season_id: seasonId } }
+        where: {
+            match: {
+                season_id: seasonId,
+                status: { in: ['FT', 'AET', 'PEN'] } // ONLY count completed games
+            }
+        }
     });
 
     const breakdown = {};
@@ -111,15 +116,20 @@ async function processLeague(leagueId, seasonYear) {
 
         const { league, country, seasons } = data;
         const currentSeason = seasons[0];
-        const leagueSlug = league.name.toLowerCase().replace(/ /g, '-');
+        const cleanLeagueName = league.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const cleanCountryName = country.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const leagueSlug = `${cleanLeagueName}-${cleanCountryName}`; // e.g., "serie-a-brazil" vs "serie-a-italy"
 
         const sport = await tx.sport.findUnique({ where: { slug: 'football' } });
         if (!sport) throw new Error("Sport 'football' not found in DB. Please run your sport seed script first.");
 
         // upserting League record
         const dbLeague = await tx.league.upsert({
-            where: { slug: leagueSlug },
-            update: {},
+            where: { id_api: String(league.id) },
+            update: {
+                slug: leagueSlug,
+                country: country.name
+            },
             create: {
                 sport_id: sport.id,
                 name: league.name,

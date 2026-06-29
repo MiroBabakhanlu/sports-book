@@ -21,10 +21,6 @@
             animation: slideInFromRight 0.25s ease-out forwards;
         }
 
-        .vertical-align-top {
-            vertical-align: top;
-        }
-
         /* Custom scrollbar for table view */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
@@ -64,11 +60,10 @@
     </nav>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
 
             <div
-                class="md:col-span-1 bg-white rounded-xl border border-gray-200 p-4 flex flex-col max-h-[450px] overflow-y-auto">
+                class="lg:col-span-1 bg-white rounded-xl border border-gray-200 p-4 flex flex-col max-h-[85vh] overflow-y-auto sticky top-24 custom-scrollbar">
                 <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-2">
                     Leagues & Seasons
                 </h2>
@@ -77,57 +72,88 @@
                 </div>
             </div>
 
-            <div class="md:col-span-3 bg-white rounded-xl border border-gray-200 p-5 flex flex-col min-h-[300px]">
-                <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">
-                    Available Teams
-                </h2>
-                <div id="teamsGrid"
-                    class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm text-gray-400 italic flex-1 items-center justify-center text-center bg-gray-50/40 rounded-lg border border-dashed border-gray-200 p-4">
-                    Select a league and season from the left sidebar panel to display teams
+            <div class="lg:col-span-3 space-y-6">
+
+                <div id="dashboardPlaceholder"
+                    class="bg-white rounded-xl border border-dashed border-gray-200 p-8 text-center min-h-[400px] flex flex-col items-center justify-center text-gray-400 italic bg-gray-50/40">
+                    <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <p class="text-sm font-medium text-gray-600 not-italic">No Team Selected</p>
+                    <p class="text-xs text-gray-400 max-w-sm mt-1 mx-auto">Select an active league, choose a season, and
+                        pick an available team from the left configuration tree panel to compute analytics metrics.</p>
+                </div>
+
+                <div id="dashboardDataGrid" class="hidden flex flex-col gap-6">
+
+                    <!-- markets for selected -->
+                    <div class="bg-white rounded-xl border border-gray-200 p-5 w-full">
+                        <div class="mb-6 border-b border-gray-200">
+                            <nav class="flex space-x-1" aria-label="Tabs">
+                                <button id="openCurrTeamAvgsBtn"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
+                                    Current team avgs
+                                </button>
+
+                                <button onclick="openTableView()"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
+                                    In-Depth Analysis
+                                </button>
+
+                                <button id="openFullTimeGameViewBtn"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
+                                    Game History
+                                </button>
+
+                                <div id="openUpcomingMatchesContainerBtn"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-gray-500 border-b-2 border-transparent flex items-center gap-1.5 cursor-pointer">
+                                    Upcoming Markets
+                                    <!-- <span id="openUpcomingMatchesContainerBtn"
+                                        class="text-blue-600 underline decoration-dotted">League</span> /
+                                    <span class="text-blue-600 underline decoration-dotted">Team</span> -->
+                                </div>
+                            </nav>
+                        </div>
+
+                    </div>
+
+                    <!-- matchday -->
+                    <div id="matchday-container" style="display: none;"
+                        class="bg-white rounded-xl border border-gray-200 p-5 w-full">
+                        <h3 class="text-xs font-bold uppercase text-gray-400 tracking-wider mb-4">Matchday Timelines
+                        </h3>
+                        <div class="overflow-x-auto custom-scrollbar">
+                            <table class="w-full text-left border-collapse min-w-[800px]">
+                                <thead>
+                                    <tr
+                                        class="text-xs uppercase tracking-wider text-gray-400 border-b border-gray-200 bg-gray-50/70">
+                                        <th class="py-3 px-4 font-semibold">Kickoff Date</th>
+                                        <th class="py-3 px-4 font-semibold text-right w-[25%]">Home Team</th>
+                                        <th class="py-3 px-4 font-semibold text-center w-[12%]">Score</th>
+                                        <th class="py-3 px-4 font-semibold text-left w-[25%]">Away Team</th>
+                                        <th class="py-3 px-4 font-semibold text-center">Match Stats</th>
+                                        <th class="py-3 px-4 font-semibold text-center">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fixturesTableBody" class="divide-y divide-gray-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id='team-avgs-container' style="display: none;"
+                        class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+                    </div>
+
+                    <div id="upcoming-matches-container">
+
+                    </div>
+
                 </div>
             </div>
 
         </div>
-
-        <div id="dashboardDataGrid" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-
-            <div class="lg:col-span-1 bg-white rounded-xl border border-gray-200 p-5">
-                <div class="flex justify-between items-center mb-3">
-                    <h3 class="text-sm font-bold uppercase text-gray-400 tracking-wider">Calculated Market Averages</h3>
-                    <button onclick="openTableView()"
-                        class="text-[10px] font-bold uppercase tracking-wider text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-all bg-blue-50 hover:bg-blue-100 flex items-center gap-1.5">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 6h16M4 12h16M4 18h16" />
-                        </svg>
-                        Table View
-                    </button>
-                </div>
-                <div id="marketMetricsContainer" class="space-y-3"></div>
-            </div>
-
-            <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
-                <h3 class="text-sm font-bold uppercase text-gray-400 tracking-wider mb-3">Matchday Timelines</h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr
-                                class="text-xs uppercase tracking-wider text-gray-400 border-b border-gray-200 bg-gray-50">
-                                <th class="py-2 px-3">Kickoff Date</th>
-                                <th class="py-2 px-3">Matchup Setup & Stats</th>
-                                <th class="py-2 px-3 text-center">Status</th>
-                                <th class="py-2 px-3 text-right">Score</th>
-                            </tr>
-                        </thead>
-                        <tbody id="fixturesTableBody" class="divide-y divide-gray-100"></tbody>
-                    </table>
-                </div>
-            </div>
-
-        </div>
-
     </main>
-
 
     <div id="tableViewOverlay"
         class="fixed inset-0 z-[60] hidden bg-gray-900/70 backdrop-blur-sm flex justify-center items-center p-4">
@@ -145,7 +171,6 @@
                 </button>
             </div>
 
-
             <div id="tableViewContent" class="flex-1 overflow-auto p-6 custom-scrollbar">
                 <div class="text-center text-gray-400 py-12">
                     <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor"
@@ -154,482 +179,16 @@
                             d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
                     </svg>
                     <p class="text-sm font-medium">No data available</p>
-                    <p class="text-xs mt-1">Select a team from the sidebar to view market averages in table format</p>
+                    <p class="text-xs mt-1">Select an active configurations setup profile array to track trends
+                        calculations metrics logs.</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <script>
-        const API_URL = '/api/teams';
-        let selectedSeasonId = null;
-        let activeOpenLeagueId = null;
-        let currentAveragesData = [];
-        let currentMatchdaysData = [];
-
-        document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                const response = await fetch(`${API_URL}/leagues`);
-                const result = await response.json();
-                if (!result.success) throw new Error(result.message);
-
-                const leaguesContainer = document.getElementById('leaguesContainer');
-                leaguesContainer.innerHTML = result.data.map(l => `
-                    <div class="border border-gray-100 rounded-lg overflow-hidden bg-white mb-1">
-                        <button onclick="toggleLeagueDropdown(${l.id}, '${l.name.replace(/'/g, "\\'")}')"
-                            id="league-btn-${l.id}"
-                            class="w-full text-left bg-white hover:bg-gray-50 px-3 py-2.5 text-sm font-semibold transition-all flex justify-between items-center text-gray-700 border-b border-transparent">
-                            <span>${l.name}</span>
-                            <span id="arrow-${l.id}" class="text-xs text-gray-400 transform transition-transform duration-200">&darr;</span>
-                        </button>
-                        <div id="dropdown-seasons-${l.id}" class="hidden bg-gray-50/50 px-2 py-1.5 space-y-1 border-t border-gray-150">
-                            <div class="text-xs text-gray-400 italic p-1 text-center">Loading seasons...</div>
-                        </div>
-                    </div>
-                `).join('');
-            } catch (err) {
-                document.getElementById('leaguesContainer').innerHTML = `<div class="text-xs text-red-500 p-2">Error structural config loading.</div>`;
-            }
-        });
-
-        async function toggleLeagueDropdown(leagueId, leagueName) {
-            const dropdown = document.getElementById(`dropdown-seasons-${leagueId}`);
-            const arrow = document.getElementById(`arrow-${leagueId}`);
-
-            if (activeOpenLeagueId === leagueId && !dropdown.classList.contains('hidden')) {
-                dropdown.classList.add('hidden');
-                arrow.classList.remove('rotate-180');
-                return;
-            }
-
-            if (activeOpenLeagueId && activeOpenLeagueId !== leagueId) {
-                const oldDropdown = document.getElementById(`dropdown-seasons-${activeOpenLeagueId}`);
-                const oldArrow = document.getElementById(`arrow-${activeOpenLeagueId}`);
-                if (oldDropdown) oldDropdown.classList.add('hidden');
-                if (oldArrow) oldArrow.classList.remove('rotate-180');
-            }
-
-            activeOpenLeagueId = leagueId;
-            dropdown.classList.remove('hidden');
-            arrow.classList.add('rotate-180');
-            document.getElementById('navigationBreadcrumb').textContent = `League: ${leagueName} > Select Season`;
-
-            try {
-                const response = await fetch(`${API_URL}/seasons?leagueId=${leagueId}`);
-                const result = await response.json();
-
-                dropdown.innerHTML = result.data.map(s => `
-                    <button onclick="selectSeason(event, ${s.id}, '${s.year || s.name}', '${leagueName.replace(/'/g, "\\'")}')"
-                        id="season-sub-btn-${s.id}"
-                        class="w-full text-left bg-white hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded text-xs font-medium text-gray-600 flex justify-between items-center transition-colors">
-                        <span>Season ${s.year || s.name}</span>
-                        <span class="text-gray-400 text-[10px] font-mono">&rarr;</span>
-                    </button>
-                `).join('');
-            } catch (err) {
-                dropdown.innerHTML = `<div class="text-xs text-red-500 p-1">Failed to fetch periods.</div>`;
-            }
-        }
-
-        async function selectSeason(event, seasonId, seasonName, leagueName) {
-            event.stopPropagation();
-            selectedSeasonId = seasonId;
-
-            document.querySelectorAll('[id^="season-sub-btn-"]').forEach(b => b.classList.remove('border-blue-500', 'bg-blue-50/50', 'text-blue-600'));
-            document.getElementById(`season-sub-btn-${seasonId}`).classList.add('border-blue-500', 'bg-blue-50/50', 'text-blue-600');
-
-            document.getElementById('navigationBreadcrumb').textContent = `League: ${leagueName} > Season: ${seasonName} > Select Team`;
-            document.getElementById('dashboardDataGrid').classList.add('hidden');
-
-            const teamsGrid = document.getElementById('teamsGrid');
-            teamsGrid.classList.remove('items-center', 'justify-center', 'italic', 'text-center', 'bg-gray-50/40', 'border-dashed');
-            teamsGrid.innerHTML = `<div class="col-span-full text-xs text-gray-400 text-center py-4 animate-pulse">Assembling team listing arrays...</div>`;
-
-            try {
-                const response = await fetch(`${API_URL}/teams?seasonId=${seasonId}`);
-                const result = await response.json();
-
-                if (result.data.length === 0) {
-                    teamsGrid.innerHTML = `<div class="col-span-full text-xs text-gray-400 text-center py-4">No team configurations processed here yet.</div>`;
-                    return;
-                }
-
-                teamsGrid.innerHTML = result.data.map(t => `
-                    <button onclick="selectTeam(${t.id}, '${t.name.replace(/'/g, "\\'")}')"
-                        id="team-card-${t.id}"
-                        class="w-full text-left bg-white border border-gray-200 hover:border-blue-300 hover:bg-gray-50/40 p-2.5 rounded-lg transition-all flex items-center gap-3 group">
-                        <img src="${t.logo_url || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2220%22><rect width=%22100%%22 height=%22100%%22 fill=%22%23f3f4f6%22/><text x=%2250%%22 y=%2260%%22 font-size=%2210%22 text-anchor=%22middle%22></text></svg>'" class="w-6 h-6 object-contain shrink-0" />
-                        <span class="text-xs font-semibold text-gray-700 truncate group-hover:text-blue-600">${t.name}</span>
-                    </button>
-                `).join('');
-            } catch (err) {
-                teamsGrid.innerHTML = `<div class="col-span-full text-xs text-red-500 p-2">Error processing local structural arrays.</div>`;
-            }
-        }
-
-        function toggleAuditPanel(marketSlug) {
-            const panel = document.getElementById(`audit-panel-${marketSlug}`);
-            const arrow = document.getElementById(`audit-arrow-${marketSlug}`);
-            if (panel.classList.contains('hidden')) {
-                panel.classList.remove('hidden');
-                arrow.innerHTML = '&uarr; Close';
-                arrow.classList.add('text-blue-600', 'bg-blue-50');
-            } else {
-                panel.classList.add('hidden');
-                arrow.innerHTML = '&darr; Audit';
-                arrow.classList.remove('text-blue-600', 'bg-blue-50');
-            }
-        }
-
-        function getColorForValue(value, avgValue) {
-            if (value === null || value === undefined || value === '-') {
-                return 'text-gray-300';
-            }
-            const numVal = Number(value);
-
-            if (numVal === 0) {
-                return 'text-red-400 font-medium';
-            }
-            if (numVal > avgValue) {
-                return 'text-blue-600 font-bold bg-blue-50/50 rounded';
-            }
-            return 'text-gray-600';
-        }
-
-        function openTableView() {
-            const overlay = document.getElementById('tableViewOverlay');
-            const content = document.getElementById('tableViewContent');
-            const subtitle = document.getElementById('tableViewSubtitle');
-
-            if (currentAveragesData.length === 0 || currentMatchdaysData.length === 0) {
-                content.innerHTML = `
-                    <div class="text-center text-gray-400 py-12">
-                        <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
-                        </svg>
-                        <p class="text-sm font-medium">No data available</p>
-                        <p class="text-xs mt-1">Select a team from the sidebar to view market averages in table format</p>
-                    </div>
-                `;
-            } else {
-                const avgLookup = {};
-                currentAveragesData.forEach(avg => {
-                    avgLookup[avg.market.slug.toLowerCase()] = avg.avg_value;
-                });
-
-                let tableHTML = `
-                    <div class="overflow-x-auto">
-                        <div class="mb-3 text-xs text-gray-500">
-                            <span class="inline-flex items-center gap-2 mr-4">
-                                <span class="inline-block w-3 h-3 rounded bg-red-400"></span> Zero (0)
-                            </span>
-                            <span class="inline-flex items-center gap-2">
-                                <span class="inline-block w-3 h-3 rounded bg-blue-600"></span> Above Average
-                            </span>
-                        </div>
-                        <table class="w-full border-collapse text-sm">
-                            <thead>
-                                <tr class="bg-gray-50 border-b-2 border-gray-200">
-                                    <th class="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-gray-500 sticky top-0 bg-gray-50 z-10" style="min-width: 140px;">Market</th>
-                                    <th class="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-gray-500 sticky top-0 bg-gray-50 z-10" style="min-width: 80px;">Avg Value</th>
-                                    <th class="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-gray-500 sticky top-0 bg-gray-50 z-10" style="min-width: 70px;">Total</th>
-                                    ${currentMatchdaysData.map((match, index) => `
-                                        <th class="text-center py-3 px-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 sticky top-0 bg-gray-50 z-10 matchday-cell" title="${new Date(match.kickoff_at).toLocaleDateString()}">
-                                             ${index + 1}
-                                        </th>
-                                    `).join('')}
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-100">
-                `;
-
-                // For each market calculate and display values for all matchdays
-                currentAveragesData.forEach((avg, index) => {
-                    const slug = avg.market.slug.toLowerCase();
-                    const val = avg.avg_value !== null ? Number(avg.avg_value).toFixed(2) : '-';
-                    const totalVal = avg.total_sum !== null && avg.total_sum !== undefined ? Math.round(avg.total_sum) : '-';
-                    const avgValue = avg.avg_value || 0;
-
-                    const bgColor = index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50';
-
-                    tableHTML += `
-                        <tr class="${bgColor} hover:bg-gray-100/70 transition-colors">
-                            <td class="py-3 px-4 font-semibold text-gray-700">
-                                <span class="text-[11px] uppercase tracking-wider">${avg.market.slug.replace(/-/g, ' ')}</span>
-                            </td>
-                            <td class="py-3 px-4 text-center font-bold text-gray-900 text-base">${val}</td>
-                            <td class="py-3 px-4 text-center font-mono text-gray-600 bg-gray-50/50 rounded">${totalVal}</td>
-                    `;
-
-                    currentMatchdaysData.forEach((match, mdIndex) => {
-                        let rawValue = '-';
-
-                        switch (slug) {
-                            case 'team-goals':
-                                rawValue = match.team_goals !== undefined ? match.team_goals : '-';
-                                break;
-                            case 'total-goals':
-                                rawValue = match.total_goals !== undefined ? match.total_goals : '-';
-                                break;
-                            case 'team-yellow-cards':
-                                rawValue = match.team_yellows !== undefined ? match.team_yellows : '-';
-                                break;
-                            case 'total-yellow-cards':
-                                rawValue = match.total_yellows !== undefined ? match.total_yellows : '-';
-                                break;
-                            case 'team-red-cards':
-                                rawValue = match.team_reds !== undefined ? match.team_reds : '-';
-                                break;
-                            case 'total-red-cards':
-                                rawValue = match.total_reds !== undefined ? match.total_reds : '-';
-                                break;
-                            case 'team-corner-kicks':
-                                rawValue = match.team_corners !== undefined ? match.team_corners : '-';
-                                break;
-                            case 'total-corner-kicks':
-                                rawValue = match.total_corners !== undefined ? match.total_corners : '-';
-                                break;
-                            default:
-                                rawValue = '-';
-                        }
-
-                        const cellClass = getColorForValue(rawValue, avgValue);
-
-                        tableHTML += `
-                            <td class="text-center py-3 px-2 font-mono text-xs matchday-cell ${cellClass}">
-                                ${rawValue}
-                            </td>
-                        `;
-                    });
-
-                    tableHTML += `
-                        </tr>
-                    `;
-                });
-
-                tableHTML += `
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-
-                content.innerHTML = tableHTML;
-                subtitle.textContent = `Showing ${currentAveragesData.length} markets with ${currentMatchdaysData.length} matchdays for the selected team`;
-            }
-
-            overlay.classList.remove('hidden');
-            document.body.classList.add('overflow-hidden');
-        }
-
-        function closeTableView() {
-            document.getElementById('tableViewOverlay').classList.add('hidden');
-            document.body.classList.remove('overflow-hidden');
-        }
+    <script src="./js/main.js"></script>
 
 
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                closeTableView();
-            }
-        });
-
-
-        document.getElementById('tableViewOverlay').addEventListener('click', (e) => {
-            if (e.target === e.currentTarget) {
-                closeTableView();
-            }
-        });
-
-        async function selectTeam(teamId, teamName) {
-            document.querySelectorAll('[id^="team-card-"]').forEach(b => b.classList.remove('border-blue-500', 'bg-blue-50/30'));
-            const selectedBlock = document.getElementById(`team-card-${teamId}`);
-            if (selectedBlock) selectedBlock.classList.add('border-blue-500', 'bg-blue-50/30');
-
-            try {
-                const response = await fetch(`${API_URL}/dashboard?teamId=${teamId}&seasonId=${selectedSeasonId}`);
-                const result = await response.json();
-                if (!result.success) throw new Error(result.message);
-
-                const { averages, matches } = result.data;
-                currentAveragesData = averages;
-
-                // Prepare matchday data with all calculated values
-                currentMatchdaysData = matches.map(m => {
-                    return {
-                        kickoff_at: m.kickoff_at,
-                        team_goals: m.home_team_id === teamId ? m.home_score : m.away_score,
-                        total_goals: (m.home_score !== null && m.away_score !== null) ? m.home_score + m.away_score : null,
-                        team_yellows: m.home_team_id === teamId ? m.home_yellows : m.away_yellows,
-                        total_yellows: (m.home_yellows !== null && m.away_yellows !== null) ? m.home_yellows + m.away_yellows : null,
-                        team_reds: m.home_team_id === teamId ? m.home_reds : m.away_reds,
-                        total_reds: (m.home_reds !== null && m.away_reds !== null) ? m.home_reds + m.away_reds : null,
-                        team_corners: m.home_team_id === teamId ? m.home_corners : m.away_corners,
-                        total_corners: (m.home_corners !== null && m.away_corners !== null) ? m.home_corners + m.away_corners : null
-                    };
-                });
-
-                const marketMetricsContainer = document.getElementById('marketMetricsContainer');
-                if (averages.length === 0) {
-                    marketMetricsContainer.innerHTML = `<p class="text-xs text-gray-400 italic p-2">No summary calculated metrics compiled.</p>`;
-                } else {
-                    marketMetricsContainer.innerHTML = averages.map(avg => {
-                        const val = avg.avg_value !== null ? Number(avg.avg_value).toFixed(2) : '-';
-                        const hVal = avg.avg_value_home !== null ? Number(avg.avg_value_home).toFixed(2) : '-';
-                        const aVal = avg.avg_value_away !== null ? Number(avg.avg_value_away).toFixed(2) : '-';
-
-                        const totalVal = avg.total_sum !== null && avg.total_sum !== undefined ? Math.round(avg.total_sum) : '-';
-                        const totalHVal = avg.total_sum_home !== null && avg.total_sum_home !== undefined ? Math.round(avg.total_sum_home) : '-';
-                        const totalAVal = avg.total_sum_away !== null && avg.total_sum_away !== undefined ? Math.round(avg.total_sum_away) : '-';
-
-                        let suffix = 'stats';
-                        const slug = avg.market.slug.toLowerCase();
-                        if (slug.includes('goal')) suffix = 'goals';
-                        else if (slug.includes('card')) suffix = 'cards';
-                        else if (slug.includes('corner')) suffix = 'corners';
-
-                        return `
-                            <div class="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col shadow-sm">
-                                <div class="p-3 flex justify-between items-center bg-white">
-                                    <div>
-                                        <span class="text-[10px] font-bold uppercase text-gray-400 tracking-wider block">
-                                            ${avg.market.slug.replace(/-/g, ' ')}
-                                        </span>
-                                        <div class="flex items-baseline gap-2 mt-0.5">
-                                            <span class="text-base font-bold text-gray-900">${val}</span>
-                                            <span class="text-[9px] font-bold text-gray-400 italic bg-gray-100 px-1.5 py-0.5 rounded">
-                                                ${totalVal} ${suffix}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <div class="text-right text-[10px] font-mono text-gray-500 bg-gray-50 border border-gray-150 px-2 py-1 rounded">
-                                            <div>Home: <strong class="text-gray-700">${hVal}</strong> <span class="text-gray-400 text-[9px]">(${totalHVal})</span></div>
-                                            <div class="border-t border-gray-100 mt-0.5 pt-0.5">Away: <strong class="text-gray-700">${aVal}</strong> <span class="text-gray-400 text-[9px]">(${totalAVal})</span></div>
-                                        </div>
-                                        
-                                        <button onclick="toggleAuditPanel('${avg.market.slug}')" id="audit-arrow-${avg.market.slug}" class="text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-2 py-3 transition-all">
-                                            &darr; Audit
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div id="audit-panel-${avg.market.slug}" class="hidden bg-gray-50 border-t border-gray-200 p-2 max-h-[260px] overflow-y-auto">
-                                    <table class="w-full text-left text-[11px] border-collapse">
-                                        <thead>
-                                            <tr class="text-[9px] uppercase tracking-wider text-gray-400 border-b border-gray-200 font-mono">
-                                                <th class="pb-1 px-1">Date</th>
-                                                <th class="pb-1 px-1">Opponent</th>
-                                                <th class="pb-1 px-1 text-center">Score</th>
-                                                <th class="pb-1 px-1 text-right text-blue-600 font-bold bg-blue-50/50 rounded-t">Raw Val</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="divide-y divide-gray-100 text-gray-600 font-mono">
-                                            ${(avg.matchDays || []).map(md => {
-                            const matchDate = new Date(md.kickoff_at).toLocaleDateString(undefined, {
-                                month: 'short', day: 'numeric'
-                            });
-                            const oppName = md.opponent?.name || 'Unknown';
-                            return `
-                                                    <tr class="hover:bg-white/70 transition-colors">
-                                                        <td class="py-1 px-1 text-gray-400 text-[10px]">${matchDate}</td>
-                                                        <td class="py-1 px-1 truncate max-w-[110px]" title="${oppName}">
-                                                            <span class="text-[9px] font-bold px-1 py-0.2 bg-gray-200/80 text-gray-600 rounded-sm mr-1">${md.venue[0]}</span>
-                                                            ${oppName}
-                                                        </td>
-                                                        <td class="py-1 px-1 text-center text-gray-500">${md.score}</td>
-                                                        <td class="py-1 px-1 text-right text-gray-900 font-bold bg-blue-50/30 font-mono">${md.rawValue}</td>
-                                                    </tr>
-                                                `;
-                        }).join('')}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                }
-
-                const fixturesTableBody = document.getElementById('fixturesTableBody');
-                if (matches.length === 0) {
-                    fixturesTableBody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-xs text-gray-400">No match events logged.</td></tr>`;
-                } else {
-                    fixturesTableBody.innerHTML = matches.map(m => {
-                        const isFinished = ['FT', 'AET', 'PEN'].includes(m.status);
-                        const isLive = ['1H', '2H', 'HT', 'ET', 'PEN'].includes(m.status) && !isFinished;
-
-                        let badgeClass = "bg-gray-100 text-gray-600";
-                        if (isFinished) badgeClass = "bg-green-50 text-green-700 border border-green-200";
-                        if (isLive) badgeClass = "bg-amber-50 text-amber-700 border border-amber-200 font-bold animate-pulse";
-
-                        const scoreDisplay = (m.home_score !== null && m.away_score !== null) ? `${m.home_score} - ${m.away_score}` : 'vs';
-
-                        let scoreColorClass = "text-gray-900 font-bold";
-                        if (isFinished && m.home_score !== null && m.away_score !== null) {
-                            const isHome = m.home_team_id === teamId;
-                            const mainTeamScore = isHome ? m.home_score : m.away_score;
-                            const opponentScore = isHome ? m.away_score : m.home_score;
-
-                            if (mainTeamScore > opponentScore) {
-                                scoreColorClass = "text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded border border-green-100";
-                            } else if (mainTeamScore < opponentScore) {
-                                scoreColorClass = "text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100";
-                            } else {
-                                scoreColorClass = "text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded";
-                            }
-                        }
-
-                        const matchDate = new Date(m.kickoff_at).toLocaleDateString(undefined, {
-                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                        });
-
-                        const fallbackIcon = `data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22><rect width=%22100%%22 height=%22100%%22 fill=%22%23f3f4f6%22/><text x=%2250%%22 y=%2265%%22 font-size=%229%22 text-anchor=%22middle%22></text></svg>`;
-
-                        return `
-                            <tr class="hover:bg-gray-50/40 transition-colors">
-                                <td class="py-3 px-3 text-xs font-mono text-gray-500 vertical-align-top pt-3.5">${matchDate}</td>
-                                <td class="py-3 px-3 text-xs text-gray-800">
-                                    <div class="flex flex-col gap-1.5">
-                                        <div class="flex items-center gap-2 max-w-md truncate">
-                                            <img src="${m.homeTeam?.logo_url || ''}" onerror="this.src='${fallbackIcon}'" class="w-4 h-4 object-contain shrink-0" />
-                                            <span class="${m.home_team_id === teamId ? 'font-bold text-blue-600' : ''}">${m.homeTeam?.name || 'Unknown'}</span>
-                                            <span class="text-gray-400 mx-0.5 font-normal">v</span>
-                                            <img src="${m.awayTeam?.logo_url || ''}" onerror="this.src='${fallbackIcon}'" class="w-4 h-4 object-contain shrink-0" />
-                                            <span class="${m.away_team_id === teamId ? 'font-bold text-blue-600' : ''}">${m.awayTeam?.name || 'Unknown'}</span>
-                                        </div>
-
-                                        <div class="flex items-center gap-2 mt-0.5 text-[10px] text-gray-500 font-mono select-none">
-                                            <span class="flex items-center gap-1 bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-100" title="Yellow Cards">
-                                                <span class="w-1.5 h-2.5 bg-amber-400 rounded-[1px] inline-block shadow-sm"></span>
-                                                <span>${m.home_yellows ?? 0} - ${m.away_yellows ?? 0}</span>
-                                            </span>
-                                            <span class="flex items-center gap-1 bg-red-50 text-red-700 px-1.5 py-0.5 rounded border border-red-100" title="Red Cards">
-                                                <span class="w-1.5 h-2.5 bg-red-500 rounded-[1px] inline-block shadow-sm"></span>
-                                                <span>${m.home_reds ?? 0} - ${m.away_reds ?? 0}</span>
-                                            </span>
-                                            <span class="flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-100" title="Corners">
-                                                <span class="font-sans text-[11px]">C</span>
-                                                <span>${m.home_corners ?? 0} - ${m.away_corners ?? 0}</span>
-                                            </span>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td class="py-3 px-3 text-center vertical-align-top pt-3.5">
-                                    <span class="px-1.5 py-0.5 text-[9px] rounded font-semibold uppercase tracking-wider ${badgeClass}">${m.status}</span>
-                                </td>
-                                <td class="py-3 px-3 text-right font-mono text-xs vertical-align-top pt-3.5">
-                                    <span class="${scoreColorClass}">${scoreDisplay}</span>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
-                }
-
-                document.getElementById('dashboardDataGrid').classList.remove('hidden');
-            } catch (error) {
-                alert("Could not load dashboard content blocks");
-            }
-        }
-    </script>
 </body>
 
 </html>
