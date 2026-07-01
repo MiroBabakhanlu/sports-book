@@ -76,8 +76,15 @@ const teamsServices = {
                     }
                 }
             },
-            // orderBy: { kickoff_at: 'desc' }
             orderBy: { kickoff_at: 'asc' }
+        });
+
+        // ✅ ONLY ADDITION: fetch streaks once
+        const streaks = await prisma.teamStreak.findMany({
+            where: {
+                team_id: tId,
+                season_id: sId
+            }
         });
 
         const formattedMatches = matches.map(m => {
@@ -113,6 +120,11 @@ const teamsServices = {
             let total_sum = 0;
             let total_sum_home = 0;
             let total_sum_away = 0;
+
+            // ✅ ONLY ADDITION: match streak for this market
+            const streak = streaks.find(
+                s => s.market_id === avg.market_id
+            );
 
             const matchDays = formattedMatches.map(m => {
                 const isHome = m.home_team_id === tId;
@@ -170,16 +182,36 @@ const teamsServices = {
 
             return {
                 ...avg,
+
+                // ✅ ONLY CHANGE: add streak object
+                streak: streak
+                    ? {
+                        length: streak.streak_length,
+                        direction: streak.streak_direction
+                    }
+                    : null,
+
                 total_sum,
                 total_sum_home,
                 total_sum_away,
-                matchDays
+                matchDays,
             };
         });
 
-        // console.log('formattedMatches:', averagesWithTotals);
-
-        return { averages: averagesWithTotals, matches: formattedMatches };
+        return {
+            averages: averagesWithTotals,
+            matches: formattedMatches,
+            teamLogo: formattedMatches.length > 0
+                ? (formattedMatches[0].home_team_id === tId
+                    ? formattedMatches[0].homeTeam.logo_url
+                    : formattedMatches[0].awayTeam.logo_url)
+                : null,
+            teamName: formattedMatches.length > 0
+                ? (formattedMatches[0].home_team_id === tId
+                    ? formattedMatches[0].homeTeam.name
+                    : formattedMatches[0].awayTeam.name)
+                : null
+        };
     },
 
     getUpcomingMatches: async (leagueId, seasonYear) => {

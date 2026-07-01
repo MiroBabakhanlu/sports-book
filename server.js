@@ -45,9 +45,9 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        runPipelines(targetLeagues)
-        runOddsPipeline(targetLeagues);
-        startStreakWorker(activeLeagues);
+        // runPipelines(targetLeagues)
+        // runOddsPipeline(targetLeagues);
+        // startStreakWorker(targetLeagues);
     } catch (err) {
         console.error('Shutting down server due to DB connection failure');
         process.exit(1);

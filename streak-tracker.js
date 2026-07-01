@@ -54,12 +54,12 @@ async function calculateLeagueStreaks(leagueId, seasonYear) {
                 const mostRecentValue = Number(marketStats[0].value);
 
                 // If most recent is exactly the average, streak is broken/non-existent
-                if (mostRecentValue === averageValue) {
-                    await prisma.teamStreak.deleteMany({
-                        where: { team_id: teamId, season_id: season.id, market_id: avg.market_id }
-                    });
-                    continue;
-                }
+                // if (mostRecentValue === averageValue) {
+                //     await prisma.teamStreak.deleteMany({
+                //         where: { team_id: teamId, season_id: season.id, market_id: avg.market_id }
+                //     });
+                //     continue;
+                // }
 
                 // Determine streak direction based on the latest game
                 const streakDirection = mostRecentValue > averageValue ? 'above' : 'below';
