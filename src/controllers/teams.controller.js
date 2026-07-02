@@ -42,8 +42,18 @@ const teamsController = {
 
     getUpcomingMatches: async (req, res, next) => {
         try {
-            const { leagueId, season } = req.query;
-            const data = await teamsServices.getUpcomingMatches(leagueId, season);
+            const { leagueId, teamId, season } = req.query;
+
+            if (!season) {
+                return res.status(400).json({ error: "Season parameter is required." });
+            }
+
+            const data = await teamsServices.getUpcomingMatches({
+                leagueId: leagueId ? parseInt(leagueId) : undefined,
+                teamId: teamId ? parseInt(teamId) : undefined,
+                seasonYear: season
+            });
+
             return res.status(200).json({ success: true, data });
         } catch (error) {
             next(error);

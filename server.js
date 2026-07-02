@@ -22,14 +22,14 @@ app.use('/api/teams', teamsRoutes);
 
 const port = process.env.PORT || 8080;
 const targetLeagues = [
-    [140, 2025],
-    [39, 2026],
-    [39, 2025],
-    [135, 2025],
-    [253, 2026],
-    [71, 2026],
-    [169, 2026],
-    [169, 2025],
+    // [140, 2025],
+    // [39, 2026],
+    // [39, 2025],
+    // [135, 2025],
+    // [253, 2026],
+    // [71, 2026],
+    // [169, 2026],
+    // [169, 2025],
 ];
 
 const activeLeagues = [
@@ -46,7 +46,7 @@ app.listen(port, async () => {
         console.log(process.env.DATABASE_URL)
         await connectDB();
         // runPipelines(targetLeagues)
-        // runOddsPipeline(targetLeagues);
+        runOddsPipeline(activeLeagues);
         // startStreakWorker(targetLeagues);
     } catch (err) {
         console.error('Shutting down server due to DB connection failure');

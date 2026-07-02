@@ -91,12 +91,12 @@
                     <div class="bg-white rounded-xl border border-gray-200 p-5 w-full">
                         <div class="mb-6 border-b border-gray-200">
                             <nav class="flex space-x-1" aria-label="Tabs">
-                                <button id="openCurrTeamAvgsBtn"
+                                <button style="display: none;" id="openCurrTeamAvgsBtn"
                                     class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
                                     Current team avgs
                                 </button>
 
-                                <button onclick="openTableView()"
+                                <button id="openInDepthView"
                                     class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
                                     In-Depth Analysis
                                 </button>
@@ -109,9 +109,15 @@
                                 <div id="openUpcomingMatchesContainerBtn"
                                     class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-gray-500 border-b-2 border-transparent flex items-center gap-1.5 cursor-pointer">
                                     Upcoming Markets
-                                    <!-- <span id="openUpcomingMatchesContainerBtn"
-                                        class="text-blue-600 underline decoration-dotted">League</span> /
-                                    <span class="text-blue-600 underline decoration-dotted">Team</span> -->
+                                    <div id="upComingGamesSwitchContainer" style="display: none;">
+
+                                        <span id="league-games"
+                                            class="text-gray-500 underline decoration-dotted cursor-pointer hover:text-blue-600 transition-colors">League</span>
+                                        /
+                                        <span id="team-games"
+                                            class="text-blue-600 underline decoration-dotted cursor-pointer font-bold">Team
+                                        </span>
+                                    </div>
                                 </div>
                             </nav>
                         </div>
@@ -149,42 +155,17 @@
 
                     </div>
 
+                    <div id="in-depth-container">
+
+                    </div>
+
                 </div>
             </div>
 
         </div>
     </main>
 
-    <div id="tableViewOverlay"
-        class="fixed inset-0 z-[60] hidden bg-gray-900/70 backdrop-blur-sm flex justify-center items-center p-4">
-        <div class="w-[98%] max-w-[98%] h-[95vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
 
-            <div
-                class="bg-gradient-to-r from-gray-50 to-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0">
-                <div>
-                    <h2 class="text-lg font-bold text-gray-900">Market Averages - Detailed View</h2>
-                    <p id="tableViewSubtitle" class="text-xs text-gray-500 mt-0.5">Select a team to view market data</p>
-                </div>
-                <button onclick="closeTableView()"
-                    class="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100 transition-colors text-xs font-semibold uppercase tracking-wider flex items-center gap-1 border border-gray-200 shadow-sm bg-white cursor-pointer">
-                    ✕ Close
-                </button>
-            </div>
-
-            <div id="tableViewContent" class="flex-1 overflow-auto p-6 custom-scrollbar">
-                <div class="text-center text-gray-400 py-12">
-                    <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor"
-                        viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                            d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-                    </svg>
-                    <p class="text-sm font-medium">No data available</p>
-                    <p class="text-xs mt-1">Select an active configurations setup profile array to track trends
-                        calculations metrics logs.</p>
-                </div>
-            </div>
-        </div>
-    </div>
 
 
     <div id="twoTeamtableViewContent">

@@ -8,6 +8,16 @@ const SLUG_MAP = {
     'red-cards-over-under': 'total-red-cards',
     'yellow-cards-over-under': 'total-yellow-cards'
 };
+const STREAK_CHECK_SLUGS = [
+    // 'team-goals',
+    'total-goals',
+    // 'team-yellow-cards',
+    'total-yellow-cards',
+    // 'team-red-cards',
+    'total-red-cards',
+    // 'team-corner-kicks',
+    'total-corner-kicks'
+];
 
 const teamsServices = {
     getLeagues: async () => {
@@ -213,21 +223,34 @@ const teamsServices = {
                 : null
         };
     },
-
-    getUpcomingMatches: async (leagueId, seasonYear) => {
+    getUpcomingMatches: async ({ leagueId, teamId, seasonYear }) => {
         const now = new Date();
 
-        console.log(`\n🔍 Searching for League ID: ${leagueId}, Season: ${seasonYear}`);
+        console.log(`\n🔍 Searching Upcoming Matches - League: ${leagueId || 'N/A'}, Team: ${teamId || 'N/A'}, Season: ${seasonYear}`);
 
+        // 1. Build dynamic match filter based on input parameters
+        const matchWhereClause = {
+            status: 'NS',
+            kickoff_at: { gte: now },
+            season: {
+                year: seasonYear.toString()
+            }
+        };
+
+        if (leagueId) {
+            matchWhereClause.season.league_id = parseInt(leagueId);
+        }
+
+        if (teamId) {
+            matchWhereClause.OR = [
+                { home_team_id: parseInt(teamId) },
+                { away_team_id: parseInt(teamId) }
+            ];
+        }
+
+        // 2. Fetch matches along with odds data
         const matches = await prisma.match.findMany({
-            where: {
-                status: 'NS',
-                kickoff_at: { gte: now },
-                season: {
-                    league_id: parseInt(leagueId),
-                    year: seasonYear.toString()
-                }
-            },
+            where: matchWhereClause,
             include: {
                 homeTeam: { select: { id: true, name: true, logo_url: true } },
                 awayTeam: { select: { id: true, name: true, logo_url: true } },
@@ -251,17 +274,35 @@ const teamsServices = {
             orderBy: { kickoff_at: 'asc' }
         });
 
-        console.log(`Found ${matches.length} upcoming matches.`);
+        console.log(`Found ${matches.length} total upcoming matches in season schedule.`);
+        if (matches.length === 0) return [];
 
-        if (matches.length === 0) {
-            return [];
-        }
-
+        // 3. Pre-fetch target markets for stats and streak verification
         const allMarkets = await prisma.market.findMany({
-            where: { slug: { in: Object.values(SLUG_MAP) } }
+            where: { slug: { in: STREAK_CHECK_SLUGS } }
         });
+        const streakMarketIds = allMarkets.map(m => m.id);
 
+        // 4. Process matches parallelly
         const result = await Promise.all(matches.map(async (match) => {
+            const hasOddsRecords = match.matchOdds.length > 0;
+
+            // FALLBACK PATH: If there are no odds, check if either team has a high streak (>= 3)
+            if (!hasOddsRecords) {
+                const hasHighStreak = await prisma.teamStreak.findFirst({
+                    where: {
+                        season_id: match.season_id,
+                        market_id: { in: streakMarketIds },
+                        team_id: { in: [match.home_team_id, match.away_team_id] },
+                        streak_length: { gte: 3 }
+                    }
+                });
+
+                // No odds AND no high streaks? Completely drop this match from the output feed
+                if (!hasHighStreak) return null;
+            }
+
+            // Map out available odds into memory structure
             const oddsByMarket = {};
             match.matchOdds.forEach(o => {
                 const slug = o.market.slug;
@@ -274,28 +315,20 @@ const teamsServices = {
 
             const marketData = [];
 
+            // 5. Gather statistical data for the mapped target markets
             for (const [rawSlug, canonicalSlug] of Object.entries(SLUG_MAP)) {
-                if (!oddsByMarket[rawSlug] || oddsByMarket[rawSlug].length === 0) continue;
-
                 const marketRecord = allMarkets.find(m => m.slug === canonicalSlug);
                 if (!marketRecord) continue;
 
                 const getTeamData = async (teamId) => {
-                    const avg = await prisma.teamSeasonAverage.findFirst({
-                        where: {
-                            team_id: teamId,
-                            market_id: marketRecord.id,
-                            season_id: match.season_id
-                        }
-                    });
-
-                    const streak = await prisma.teamStreak.findFirst({
-                        where: {
-                            team_id: teamId,
-                            market_id: marketRecord.id,
-                            season_id: match.season_id
-                        }
-                    });
+                    const [avg, streak] = await Promise.all([
+                        prisma.teamSeasonAverage.findFirst({
+                            where: { team_id: teamId, market_id: marketRecord.id, season_id: match.season_id }
+                        }),
+                        prisma.teamStreak.findFirst({
+                            where: { team_id: teamId, market_id: marketRecord.id, season_id: match.season_id }
+                        })
+                    ]);
 
                     const val = avg ? Number(avg.avg_value) : 0;
                     return {
@@ -308,14 +341,25 @@ const teamsServices = {
                     };
                 };
 
-                marketData.push({
-                    marketSlug: rawSlug,
-                    odds: oddsByMarket[rawSlug],
-                    home: await getTeamData(match.home_team_id),
-                    away: await getTeamData(match.away_team_id)
-                });
+                const homeTeamData = await getTeamData(match.home_team_id);
+                const awayTeamData = await getTeamData(match.away_team_id);
+
+                const currentMarketOdds = oddsByMarket[rawSlug] || [];
+                const homeStreakLen = homeTeamData.streak?.length || 0;
+                const awayStreakLen = awayTeamData.streak?.length || 0;
+
+                // Only include market data if odds exist OR if either team qualifies a major streak (>= 3)
+                if (currentMarketOdds.length > 0 || homeStreakLen >= 3 || awayStreakLen >= 3) {
+                    marketData.push({
+                        marketSlug: rawSlug,
+                        odds: currentMarketOdds, // Will be returned as an empty array [] if no odds exist
+                        home: homeTeamData,
+                        away: awayTeamData
+                    });
+                }
             }
 
+            // Final safety filter step to block uninteresting dead data rows
             if (!oddsByMarket['match-winner'] && marketData.length === 0) {
                 return null;
             }
@@ -327,17 +371,145 @@ const teamsServices = {
                 league_name: match.season.league.name,
                 homeTeam: match.homeTeam,
                 awayTeam: match.awayTeam,
-                matchWinnerOdds: oddsByMarket['match-winner'] || [],
+                matchWinnerOdds: oddsByMarket['match-winner'] || [], // Empty array [] if missing odds
                 marketData
             };
         }));
 
+        // Filter out null rows dropped by validation filters
         const filteredResult = result.filter(Boolean);
-
-
-        console.log(` Pipeline finished. Returning ${filteredResult.length} matches.`);
+        console.log(`📊 Pipeline finished. Returning ${filteredResult.length} matches.`);
 
         return filteredResult;
     }
+
 };
 module.exports = teamsServices;
+
+
+
+// getUpcomingMatches: async (leagueId, seasonYear) => {
+//     const now = new Date();
+
+//     console.log(`\n🔍 Searching for League ID: ${leagueId}, Season: ${seasonYear}`);
+
+//     const matches = await prisma.match.findMany({
+//         where: {
+//             status: 'NS',
+//             kickoff_at: { gte: now },
+//             season: {
+//                 league_id: parseInt(leagueId),
+//                 year: seasonYear.toString()
+//             }
+//         },
+//         include: {
+//             homeTeam: { select: { id: true, name: true, logo_url: true } },
+//             awayTeam: { select: { id: true, name: true, logo_url: true } },
+//             season: {
+//                 include: {
+//                     league: { select: { id: true, name: true } }
+//                 }
+//             },
+//             matchOdds: {
+//                 where: {
+//                     bookmaker_name: 'Bet365',
+//                     market: { slug: { in: [...Object.keys(SLUG_MAP), 'match-winner'] } }
+//                 },
+//                 select: {
+//                     market: { select: { slug: true } },
+//                     slug: true,
+//                     odd: true
+//                 }
+//             }
+//         },
+//         orderBy: { kickoff_at: 'asc' }
+//     });
+
+//     console.log(`Found ${matches.length} upcoming matches.`);
+
+//     if (matches.length === 0) {
+//         return [];
+//     }
+
+//     const allMarkets = await prisma.market.findMany({
+//         where: { slug: { in: Object.values(SLUG_MAP) } }
+//     });
+
+//     const result = await Promise.all(matches.map(async (match) => {
+//         const oddsByMarket = {};
+//         match.matchOdds.forEach(o => {
+//             const slug = o.market.slug;
+//             if (!oddsByMarket[slug]) oddsByMarket[slug] = [];
+//             oddsByMarket[slug].push({
+//                 selection: o.slug,
+//                 odd: Number(o.odd)
+//             });
+//         });
+
+//         const marketData = [];
+
+//         for (const [rawSlug, canonicalSlug] of Object.entries(SLUG_MAP)) {
+//             if (!oddsByMarket[rawSlug] || oddsByMarket[rawSlug].length === 0) continue;
+
+//             const marketRecord = allMarkets.find(m => m.slug === canonicalSlug);
+//             if (!marketRecord) continue;
+
+//             const getTeamData = async (teamId) => {
+//                 const avg = await prisma.teamSeasonAverage.findFirst({
+//                     where: {
+//                         team_id: teamId,
+//                         market_id: marketRecord.id,
+//                         season_id: match.season_id
+//                     }
+//                 });
+
+//                 const streak = await prisma.teamStreak.findFirst({
+//                     where: {
+//                         team_id: teamId,
+//                         market_id: marketRecord.id,
+//                         season_id: match.season_id
+//                     }
+//                 });
+
+//                 const val = avg ? Number(avg.avg_value) : 0;
+//                 return {
+//                     avg_value: val,
+//                     suggestedValue: (val % 1 === 0) ? val : Math.floor(val) + 0.5,
+//                     streak: streak ? {
+//                         length: streak.streak_length,
+//                         direction: streak.streak_direction
+//                     } : null
+//                 };
+//             };
+
+//             marketData.push({
+//                 marketSlug: rawSlug,
+//                 odds: oddsByMarket[rawSlug],
+//                 home: await getTeamData(match.home_team_id),
+//                 away: await getTeamData(match.away_team_id)
+//             });
+//         }
+
+//         if (!oddsByMarket['match-winner'] && marketData.length === 0) {
+//             return null;
+//         }
+
+//         return {
+//             id: match.id,
+//             kickoff_at: match.kickoff_at,
+//             league_id: match.season.league.id,
+//             league_name: match.season.league.name,
+//             homeTeam: match.homeTeam,
+//             awayTeam: match.awayTeam,
+//             matchWinnerOdds: oddsByMarket['match-winner'] || [],
+//             marketData
+//         };
+//     }));
+
+//     const filteredResult = result.filter(Boolean);
+
+
+//     console.log(` Pipeline finished. Returning ${filteredResult.length} matches.`);
+
+//     return filteredResult;
+// },
