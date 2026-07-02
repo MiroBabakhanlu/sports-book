@@ -230,7 +230,8 @@ const teamsServices = {
 
         // 1. Build dynamic match filter based on input parameters
         const matchWhereClause = {
-            status: 'NS',
+            // FIX: Now includes both Not Started and Postponed matches
+            status: { in: ['NS', 'PST'] },
             kickoff_at: { gte: now },
             season: {
                 year: seasonYear.toString()
@@ -271,20 +272,47 @@ const teamsServices = {
                     }
                 }
             },
-            orderBy: { kickoff_at: 'asc' }
+            orderBy: { kickoff_at: 'asc' },
+            // If checking a specific team, pull only their single closest upcoming game
+            ...(teamId ? { take: 1 } : {})
         });
 
-        console.log(`Found ${matches.length} total upcoming matches in season schedule.`);
+        console.log(`Found ${matches.length} total upcoming matches in database query.`);
         if (matches.length === 0) return [];
 
-        // 3. Pre-fetch target markets for stats and streak verification
+        // 3. FIX: Track the absolute closest timeline match per unique team.
+        // This perfectly mimics the SQL window function strategy.
+        const validMatches = [];
+
+        if (teamId) {
+            // Prisma's `take: 1` already isolated the single next game for this team
+            validMatches.push(matches[0]);
+        } else {
+            const teamNextMatches = new Map(); // tracks: team_id -> closest match object
+
+            for (const match of matches) {
+                // First time seeing the home team? This is chronologically their absolute next match.
+                if (!teamNextMatches.has(match.home_team_id)) {
+                    teamNextMatches.set(match.home_team_id, match);
+                }
+                // First time seeing the away team? This is chronologically their absolute next match.
+                if (!teamNextMatches.has(match.away_team_id)) {
+                    teamNextMatches.set(match.away_team_id, match);
+                }
+            }
+
+            // Deduplicate values back into a clean array since single matches contain two teams
+            validMatches.push(...Array.from(new Set(teamNextMatches.values())));
+        }
+
+        // 4. Pre-fetch target markets for stats and streak verification
         const allMarkets = await prisma.market.findMany({
             where: { slug: { in: STREAK_CHECK_SLUGS } }
         });
         const streakMarketIds = allMarkets.map(m => m.id);
 
-        // 4. Process matches parallelly
-        const result = await Promise.all(matches.map(async (match) => {
+        // 5. Process ONLY the valid next matches parallelly
+        const result = await Promise.all(validMatches.map(async (match) => {
             const hasOddsRecords = match.matchOdds.length > 0;
 
             // FALLBACK PATH: If there are no odds, check if either team has a high streak (>= 3)
@@ -298,7 +326,7 @@ const teamsServices = {
                     }
                 });
 
-                // No odds AND no high streaks? Completely drop this match from the output feed
+                // If neither team has a high streak, return null (dead-end this match)
                 if (!hasHighStreak) return null;
             }
 
@@ -315,7 +343,7 @@ const teamsServices = {
 
             const marketData = [];
 
-            // 5. Gather statistical data for the mapped target markets
+            // 6. Gather statistical data for the mapped target markets
             for (const [rawSlug, canonicalSlug] of Object.entries(SLUG_MAP)) {
                 const marketRecord = allMarkets.find(m => m.slug === canonicalSlug);
                 if (!marketRecord) continue;
@@ -348,18 +376,16 @@ const teamsServices = {
                 const homeStreakLen = homeTeamData.streak?.length || 0;
                 const awayStreakLen = awayTeamData.streak?.length || 0;
 
-                // Only include market data if odds exist OR if either team qualifies a major streak (>= 3)
                 if (currentMarketOdds.length > 0 || homeStreakLen >= 3 || awayStreakLen >= 3) {
                     marketData.push({
                         marketSlug: rawSlug,
-                        odds: currentMarketOdds, // Will be returned as an empty array [] if no odds exist
+                        odds: currentMarketOdds,
                         home: homeTeamData,
                         away: awayTeamData
                     });
                 }
             }
 
-            // Final safety filter step to block uninteresting dead data rows
             if (!oddsByMarket['match-winner'] && marketData.length === 0) {
                 return null;
             }
@@ -371,18 +397,16 @@ const teamsServices = {
                 league_name: match.season.league.name,
                 homeTeam: match.homeTeam,
                 awayTeam: match.awayTeam,
-                matchWinnerOdds: oddsByMarket['match-winner'] || [], // Empty array [] if missing odds
+                matchWinnerOdds: oddsByMarket['match-winner'] || [],
                 marketData
             };
         }));
 
-        // Filter out null rows dropped by validation filters
         const filteredResult = result.filter(Boolean);
-        console.log(`📊 Pipeline finished. Returning ${filteredResult.length} matches.`);
+        console.log(`📊 Pipeline finished. Returning ${filteredResult.length} absolute next matches.`);
 
         return filteredResult;
     }
-
 };
 module.exports = teamsServices;
 

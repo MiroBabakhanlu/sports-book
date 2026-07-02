@@ -768,205 +768,139 @@ async function fetchAndRenderUpcomingMatches({ leagueId, teamId, seasonYear }) {
             return;
         }
 
-        // Store the original data for filtering
-        const allMatchData = result.data;
+        const insights = [];
 
-        // Function to render matches based on date filter
-        function renderMatches(dateFilter) {
-            // --- Date Filtering Logic ---
-            const now = new Date();
-            const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+        // --- Helper: Find the specific odd ---
+        const getOddForPrediction = (market, direction, val) => {
+            // Converts "11.5" and "OVER" to "over-11.5"
+            const searchStr = `${direction.toLowerCase()}-${val}`;
+            const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
+            return found ? found.odd : null;
+        };
 
-            let filteredData = allMatchData;
+        // 1. Flatten Data
+        result.data.forEach(match => {
+            const homeOddObj = match.matchWinnerOdds?.find(o => o.selection === 'home');
+            const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
 
-            if (dateFilter === '7days') {
-                const sevenDaysFromNow = new Date(todayUTC);
-                sevenDaysFromNow.setUTCDate(sevenDaysFromNow.getUTCDate() + 7);
+            match.marketData.forEach(m => {
+                // console.log('directions', m?.home?.streak.direction, m?.away?.streak.direction)
+                // Process Home
+                if (m.home?.streak?.length >= 3) { // Filter: Streak 3 and above
+                    const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                    const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
 
-                filteredData = allMatchData.filter(match => {
-                    const kickoffDate = new Date(match.kickoff_at);
-                    return kickoffDate >= todayUTC && kickoffDate < sevenDaysFromNow;
-                });
-            } else if (dateFilter === '30days') {
-                const thirtyDaysFromNow = new Date(todayUTC);
-                thirtyDaysFromNow.setUTCDate(thirtyDaysFromNow.getUTCDate() + 30);
+                    insights.push({
+                        match, isHome: true, market: m,
+                        homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                        streakCount: m.home.streak.length,
+                        suggestedValue: m.home.suggestedValue,
+                        avgValue: m.home.avg_value,
+                        direction,
+                        specificOdd
+                    });
+                }
+                // Process Away
+                if (m.away?.streak?.length >= 3) { // Filter: Streak 3 and above
+                    const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                    const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
 
-                filteredData = allMatchData.filter(match => {
-                    const kickoffDate = new Date(match.kickoff_at);
-                    return kickoffDate >= todayUTC && kickoffDate < thirtyDaysFromNow;
-                });
-            }
-
-            const insightsContainer = document.getElementById('insights-container');
-
-            if (filteredData.length === 0) {
-                insightsContainer.innerHTML = `<div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 italic">No insights for foud for this range</div>`;
-                return;
-            }
-
-            const insights = [];
-
-            // --- Helper: Find the specific odd ---
-            const getOddForPrediction = (market, direction, val) => {
-                // Converts "11.5" and "OVER" to "over-11.5"
-                const searchStr = `${direction.toLowerCase()}-${val}`;
-                const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
-                return found ? found.odd : null;
-            };
-
-            // 1. Flatten Data
-            filteredData.forEach(match => {
-                const homeOddObj = match.matchWinnerOdds?.find(o => o.selection === 'home');
-                const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
-
-                match.marketData.forEach(m => {
-                    // console.log('directions', m?.home?.streak.direction, m?.away?.streak.direction)
-                    // Process Home
-                    if (m.home?.streak?.length >= 3) { // Filter: Streak 3 and above
-                        const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
-                        const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
-
-                        insights.push({
-                            match, isHome: true, market: m,
-                            homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
-                            streakCount: m.home.streak.length,
-                            suggestedValue: m.home.suggestedValue,
-                            avgValue: m.home.avg_value,
-                            direction,
-                            specificOdd
-                        });
-                    }
-                    // Process Away
-                    if (m.away?.streak?.length >= 3) { // Filter: Streak 3 and above
-                        const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
-                        const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
-
-                        insights.push({
-                            match, isHome: false, market: m,
-                            homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
-                            streakCount: m.away.streak.length,
-                            suggestedValue: m.away.suggestedValue,
-                            avgValue: m.away.avg_value,
-                            direction,
-                            specificOdd
-                        });
-                    }
-                });
-            });
-
-            // 2. Sort by Streak
-            insights.sort((a, b) => b.streakCount - a.streakCount);
-
-            // 3. Render
-            insightsContainer.innerHTML = `
-                <div class="space-y-4">
-                    ${insights.map(i => {
-                const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
-                const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
-                const fullPrediction = `${i.direction} ${i.suggestedValue}`;
-
-                return `
-                        <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all">
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                                <div class="md:col-span-2 flex items-center justify-between bg-gray-50/50 p-4 rounded-lg">
-                                    <div class="flex flex-col items-center w-1/3">
-                                        <img src="${i.match.homeTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
-                                        <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.homeTeam.name}</div>
-                                        <div class="mt-1 text-[10px] font-bold ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.homeOdd}</div>
-                                    </div>
-                                    <div
-                                     data-home-id="${i.match.homeTeam.id}" data-away-id="${i.match.awayTeam.id}"
-                                     data-market="${i.market.marketSlug}"
-                                     data-is-home="${i.isHome}"
-                                     data-home-streak='${JSON.stringify(i.market.home.streak || [])}'
-                                     data-away-streak='${JSON.stringify(i.market.away.streak || [])}'
-                                    
-                                    class=" streak-container flex flex-col items-center flex-grow">
-                                        <div class="text-xs font-black text-red-600">${i.streakCount} IN A ROW</div>
-                                        <div class="text-[9px] text-gray-400 mt-1 uppercase">${new Date(i.match.kickoff_at).toLocaleDateString()}</div>
-                                    </div>
-                                    <div class="flex flex-col items-center w-1/3">
-                                        <img src="${i.match.awayTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
-                                        <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.awayTeam.name}</div>
-                                        <div class="mt-1 text-[10px] font-bold ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.awayOdd}</div>
-                                    </div>
-                                </div>
-
-                                <div class="pl-2">
-                                    <div class="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prediction: ${marketName}</div>
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <div class="text-xl font-black text-gray-800">${fullPrediction}</div>
-                                        ${i.specificOdd ? `<div class="bg-green-600 text-white text-[10px] px-2 py-1 rounded font-bold">${i.specificOdd}</div>` : ''}
-                                    </div>
-                                    <p class="text-[10px] text-gray-500 italic">
-                                        In the last <b>${i.streakCount}</b> matches, <b>${marketName} ${fullPrediction}</b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    `}).join('')}
-                </div>
-            `;
-
-            // At the end of renderMatches, after setting innerHTML
-            insightsContainer.querySelectorAll('.streak-container').forEach(el => {
-                el.addEventListener('click', async () => {
-                    let awayId = el.dataset.awayId;
-                    let homeId = el.dataset.homeId;
-                    const market = el.dataset.market;
-                    const homeStreak = JSON.parse(el.dataset.homeStreak);
-                    const awayStreak = JSON.parse(el.dataset.awayStreak);
-
-                    const awayTeamData = await fetch(`${API_URL}/dashboard?teamId=${awayId}&seasonId=${selectedSeasonId}`);
-                    const awayTeamResults = await awayTeamData.json();
-                    console.log(awayTeamResults);
-
-                    const homeTeamData = await fetch(`${API_URL}/dashboard?teamId=${homeId}&seasonId=${selectedSeasonId}`);
-                    const homeTeamResults = await homeTeamData.json();
-                    console.log(homeTeamResults);
-
-                    console.log('Streak clicked! IDs: ' + el.dataset.homeId + ' ' + el.dataset.awayId) + ' ' + selectedSeasonId;
-
-                    console.log(homeStreak);
-                    console.log(awayStreak);
-                    console.log(market);
-
-                    handleStreakPopUp(homeTeamResults?.data, awayTeamResults?.data, market, homeStreak, awayStreak);
-                });
-            });
-        }
-
-        // Initial container with buttons and insights container
-        container.innerHTML = `
-            <div class="mb-4 flex gap-2">
-                <button class="date-filter-btn active px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors" data-filter="7days">Next 7 Days</button>
-                <button class="date-filter-btn px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors" data-filter="30days">Next 30 Days</button>
-                <button class="date-filter-btn px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors" data-filter="all">Full Season</button>
-            </div>
-            <div id="insights-container"></div>
-        `;
-
-        // Add click handlers to buttons
-        const buttons = container.querySelectorAll('.date-filter-btn');
-        buttons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                // Remove active class from all buttons
-                buttons.forEach(b => {
-                    b.classList.remove('active', 'bg-blue-600', 'text-white');
-                    b.classList.add('bg-gray-200', 'text-gray-700');
-                });
-
-                // Add active class to clicked button
-                btn.classList.add('active', 'bg-blue-600', 'text-white');
-                btn.classList.remove('bg-gray-200', 'text-gray-700');
-
-                // Render matches for selected filter
-                renderMatches(btn.dataset.filter);
+                    insights.push({
+                        match, isHome: false, market: m,
+                        homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                        streakCount: m.away.streak.length,
+                        suggestedValue: m.away.suggestedValue,
+                        avgValue: m.away.avg_value,
+                        direction,
+                        specificOdd
+                    });
+                }
             });
         });
 
-        // Initial render with 7 days
-        renderMatches('7days');
+        // 2. Sort by Streak
+        insights.sort((a, b) => b.streakCount - a.streakCount);
+
+        // 3. Render
+        container.innerHTML = `
+            <div class="space-y-4">
+                ${insights.map(i => {
+            const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+            const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
+            const fullPrediction = `${i.direction} ${i.suggestedValue}`;
+
+            return `
+                    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                            <div class="md:col-span-2 flex items-center justify-between bg-gray-50/50 p-4 rounded-lg">
+                                <div class="flex flex-col items-center w-1/3">
+                                    <img src="${i.match.homeTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
+                                    <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.homeTeam.name}</div>
+                                    <div class="mt-1 text-[10px] font-bold ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.homeOdd}</div>
+                                </div>
+                                <div
+                                 data-home-id="${i.match.homeTeam.id}" data-away-id="${i.match.awayTeam.id}"
+                                 data-market="${i.market.marketSlug}"
+                                 data-is-home="${i.isHome}"
+                                 data-home-streak='${JSON.stringify(i.market.home.streak || [])}'
+                                 data-away-streak='${JSON.stringify(i.market.away.streak || [])}'
+                                
+                                class=" streak-container flex flex-col items-center flex-grow">
+                                    <div class="text-xs font-black text-red-600">${i.streakCount} IN A ROW</div>
+                                    <div class="text-[9px] text-gray-400 mt-1 uppercase">${new Date(i.match.kickoff_at).toLocaleDateString()}</div>
+                                </div>
+                                <div class="flex flex-col items-center w-1/3">
+                                    <img src="${i.match.awayTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
+                                    <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.awayTeam.name}</div>
+                                    <div class="mt-1 text-[10px] font-bold ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.awayOdd}</div>
+                                </div>
+                            </div>
+
+                            <div class="pl-2">
+                                <div class="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prediction: ${marketName}</div>
+                                <div class="flex items-center gap-2 mb-1">
+                                    <div class="text-xl font-black text-gray-800">${fullPrediction}</div>
+                                    ${i.specificOdd ? `<div class="bg-green-600 text-white text-[10px] px-2 py-1 rounded font-bold">${i.specificOdd}</div>` : ''}
+                                </div>
+                                <p class="text-[10px] text-gray-500 italic">
+                                    In the last <b>${i.streakCount}</b> matches, <b>${marketName} ${fullPrediction}</b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `}).join('')}
+            </div>
+        `;
+
+        // At the end of fetchAndRenderUpcomingMatches, after setting innerHTML
+        container.querySelectorAll('.streak-container').forEach(el => {
+            el.addEventListener('click', async () => {
+                let awayId = el.dataset.awayId;
+                let homeId = el.dataset.homeId;
+                const market = el.dataset.market;
+                const homeStreak = JSON.parse(el.dataset.homeStreak);
+                const awayStreak = JSON.parse(el.dataset.awayStreak);
+
+                const awayTeamData = await fetch(`${API_URL}/dashboard?teamId=${awayId}&seasonId=${selectedSeasonId}`);
+                const awayTeamResults = await awayTeamData.json();
+                console.log(awayTeamResults);
+
+                const homeTeamData = await fetch(`${API_URL}/dashboard?teamId=${homeId}&seasonId=${selectedSeasonId}`);
+                const homeTeamResults = await homeTeamData.json();
+                console.log(homeTeamResults);
+
+                console.log('Streak clicked! IDs: ' + el.dataset.homeId + ' ' + el.dataset.awayId) + ' ' + selectedSeasonId;
+
+
+
+                console.log(homeStreak);
+                console.log(awayStreak);
+                console.log(market);
+
+                handleStreakPopUp(homeTeamResults?.data, awayTeamResults?.data, market, homeStreak, awayStreak);
+            });
+        });
+
 
     } catch (err) {
         console.error("Error loading insights:", err);

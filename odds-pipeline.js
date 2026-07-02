@@ -40,7 +40,7 @@ async function syncTargetedOdds(targetLeagues) {
 
         const upcomingMatches = await prisma.match.findMany({
             where: {
-                status: "NS",
+                status: { in: ['NS', 'PST'] },
                 kickoff_at: { gte: now },
                 OR: leagueConditions
             },
