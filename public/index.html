@@ -54,7 +54,7 @@
         <div class="max-w-7xl mx-auto flex justify-between items-center">
             <span class="text-lg font-bold tracking-tight text-gray-900">demo</span>
             <div id="navigationBreadcrumb" class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                Select a League
+                Select a Specific League
             </div>
         </div>
     </nav>
@@ -66,6 +66,10 @@
                 class="lg:col-span-1 bg-white rounded-xl border border-gray-200 p-4 flex flex-col max-h-[85vh] overflow-y-auto sticky top-24 custom-scrollbar">
                 <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-2">
                     Leagues & Seasons
+                </h2>
+                <h2 id="openAllMArketsBtn"
+                    class="text-xs font-bold uppercase tracking-wider text-blue-400 mb-3 flex items-center gap-2">
+                    Full market
                 </h2>
                 <div id="leaguesContainer" class="space-y-1">
                     <div class="text-xs text-gray-400 py-4 text-center animate-pulse">Loading active leagues...</div>
@@ -88,9 +92,9 @@
                 <div id="dashboardDataGrid" class="hidden flex flex-col gap-6">
 
                     <!-- markets for selected -->
-                    <div class="bg-white rounded-xl border border-gray-200 p-5 w-full">
+                    <div id="navContainer" class="bg-white rounded-xl border border-gray-200 p-5 w-full">
                         <div class="mb-6 border-b border-gray-200">
-                            <nav class="flex space-x-1" aria-label="Tabs">
+                            <nav id="nav" class="flex space-x-1" aria-label="Tabs">
                                 <button style="display: none;" id="openCurrTeamAvgsBtn"
                                     class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
                                     Current team avgs
@@ -111,7 +115,7 @@
                                     Upcoming Markets
                                     <div id="upComingGamesSwitchContainer" style="display: none;">
 
-                                        <span id="league-games"
+                                        <span style="display: none;" id="league-games"
                                             class="text-gray-500 underline decoration-dotted cursor-pointer hover:text-blue-600 transition-colors">League</span>
                                         /
                                         <span id="team-games"

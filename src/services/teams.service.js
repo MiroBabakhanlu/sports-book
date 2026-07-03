@@ -6,16 +6,20 @@ const SLUG_MAP = {
     'corners-over-under': 'total-corner-kicks',
     'goals-overunder': 'total-goals',
     'red-cards-over-under': 'total-red-cards',
-    'yellow-cards-over-under': 'total-yellow-cards'
+    'yellow-cards-over-under': 'total-yellow-cards',
+    'team-goals': 'team-goals',
+    'team-corner-kicks': 'team-corner-kicks',
+    'team-yellow-cards': 'team-yellow-cards',
+    'team-red-cards': 'team-red-cards'
 };
 const STREAK_CHECK_SLUGS = [
-    // 'team-goals',
+    'team-goals',
     'total-goals',
-    // 'team-yellow-cards',
+    'team-yellow-cards',
     'total-yellow-cards',
-    // 'team-red-cards',
+    'team-red-cards',
     'total-red-cards',
-    // 'team-corner-kicks',
+    'team-corner-kicks',
     'total-corner-kicks'
 ];
 
@@ -223,6 +227,8 @@ const teamsServices = {
                 : null
         };
     },
+
+
     getUpcomingMatches: async ({ leagueId, teamId, seasonYear }) => {
         const now = new Date();
 

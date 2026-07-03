@@ -1,5 +1,6 @@
 const { prisma, connectDB } = require('./src/utils/prisma');
 const axios = require('axios');
+const { startStreakWorker } = require('./streak-tracker');
 
 const API_KEY = 'be6628089266c3f9779a94c9744b1dcf';
 const BASE_URL = 'https://v3.football.api-sports.io';
@@ -12,238 +13,229 @@ function chunkArray(array, size) {
     return chunks;
 }
 
-function calculateMinutesUntilNextStatusChange(status, kickoffAt) {
-    const now = new Date();
-    const minutesElapsed = Math.floor((now - new Date(kickoffAt)) / (1000 * 60));
-
-    switch (status) {
-        case 'P':
-            return 3;
-        case 'BT':
-            return 5;
-        case 'HT':
-            return 15;
-        case '2H':
-            const remainingIn2H = 95 - minutesElapsed;
-            if (remainingIn2H <= 15) return 3;
-            return Math.max(5, remainingIn2H - 10);
-        case '1H':
-            const remainingIn1H = 45 - minutesElapsed;
-            return remainingIn1H > 0 ? remainingIn1H : 5;
-        case 'ET':
-            return 15;
-        case 'NS':
-            if (minutesElapsed >= 0) return 5;
-            return Math.abs(minutesElapsed);
-        case 'SUSP':
-        case 'INT':
-        case 'PST':
-        case 'TBD':
-            return 45;
-        default:
-            return 15;
-    }
+// Dummy/Placeholder for your streak tracking function
+async function testStreak(streakArray) {
+    console.log('🔥 testStreak called with payload:', JSON.stringify(streakArray));
+    // Your custom calculation logic runs here
 }
 
-async function smartUpdateOrchestrator() {
+async function simplifiedUpdateOrchestrator() {
     try {
         await connectDB();
+        const now = new Date();
 
-        const activeMatches = await prisma.match.findMany({
+        console.log(`\n🕒 Starting update round at: ${now.toISOString()}`);
+
+        // ==========================================
+        // PHASE 1: CHECK POSTPONED (PST) GAMES
+        // ==========================================
+        const postponedMatches = await prisma.match.findMany({
+            where: { status: 'PST' },
+            select: { id_api: true }
+        });
+
+        if (postponedMatches.length > 0) {
+            console.log(`🔄 Checking ${postponedMatches.length} postponed matches for rescheduling...`);
+            const pstChunks = chunkArray(postponedMatches.map(m => m.id_api), 20);
+
+            for (const batch of pstChunks) {
+                const response = await axios.get(`${BASE_URL}/fixtures`, {
+                    headers: { 'x-apisports-key': API_KEY },
+                    params: { ids: batch.join('-') }
+                });
+
+                const fixtures = response.data.response || [];
+                for (const f of fixtures) {
+                    // If the API says it's back to "Not Started", update status and kickoff time
+                    if (f.fixture.status.short === 'NS') {
+                        const newKickoff = new Date(f.fixture.date);
+                        await prisma.match.update({
+                            where: { id_api: f.fixture.id.toString() },
+                            data: {
+                                status: 'NS',
+                                kickoff_at: newKickoff
+                            }
+                        });
+                        console.log(`⏰ Match Rescheduled: API ID ${f.fixture.id} is now NS. New Kickoff: ${newKickoff.toISOString()}`);
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // PHASE 2: CHECK NOT STARTED (NS) GAMES PAST KICKOFF
+        // ==========================================
+        const nsMatches = await prisma.match.findMany({
             where: {
-                status: { notIn: ['FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'] }
+                status: 'NS',
+                kickoff_at: { lte: now } // Only check games that are supposed to have started
             },
             select: {
                 id_api: true,
-                status: true,
-                kickoff_at: true,
                 season_id: true
             }
         });
 
-        if (activeMatches.length === 0) {
-            console.log('No live or pending matches to monitor Sleeping for 15 minutes');
-            setTimeout(smartUpdateOrchestrator, 15 * 60 * 1000);
+        if (nsMatches.length === 0) {
+            console.log('😴 No unstarted matches past kickoff time to check for completion.');
             return;
         }
 
-        const matchesToRefresh = activeMatches.filter(m => new Date(m.kickoff_at) <= new Date());
+        console.log(`🔍 Checking completion status on API for ${nsMatches.length} matches...`);
+        const nsChunks = chunkArray(nsMatches.map(m => m.id_api), 20);
 
-        if (matchesToRefresh.length > 0) {
-            console.log(`Refreshing data for ${matchesToRefresh.length} live/past matches`);
-            const allFixtureIds = matchesToRefresh.map(m => m.id_api);
-            const batches = chunkArray(allFixtureIds, 20);
-            const seasonsToRecalculate = new Set();
+        const seasonsToRecalculate = new Set();
+        const uniqueStreaksMap = new Map(); // Using a map to guarantee uniqueness of [leagueId, season]
 
-            for (let i = 0; i < batches.length; i++) {
-                const batchIds = batches[i];
-                const batchResponse = await axios.get(`${BASE_URL}/fixtures`, {
-                    headers: { 'x-apisports-key': API_KEY },
-                    params: { ids: batchIds.join('-') }
+        for (const batch of nsChunks) {
+            const response = await axios.get(`${BASE_URL}/fixtures`, {
+                headers: { 'x-apisports-key': API_KEY },
+                params: { ids: batch.join('-') }
+            });
+
+            const fixtures = response.data.response || [];
+
+            for (const f of fixtures) {
+                const currentStatus = f.fixture.status.short;
+                const isFinished = ['FT', 'AET', 'PEN'].includes(currentStatus);
+
+                // If the game isn't finished yet (still playing or went back to postponed), ignore it
+                if (!isFinished) continue;
+
+                const apiMatchId = f.fixture.id.toString();
+                console.log(`🏁 Match Finished: API ID ${apiMatchId} (${f.teams.home.name} vs ${f.teams.away.name})`);
+
+                const homeTeam = await prisma.team.findUnique({ where: { id_api: f.teams.home.id.toString() } });
+                const awayTeam = await prisma.team.findUnique({ where: { id_api: f.teams.away.id.toString() } });
+
+                if (!homeTeam || !awayTeam) continue;
+
+                // Determine Match Winner
+                let winnerTeamId = null;
+                if (f.goals.home > f.goals.away) {
+                    winnerTeamId = homeTeam.id;
+                } else if (f.goals.away > f.goals.home) {
+                    winnerTeamId = awayTeam.id;
+                } else if (currentStatus === 'PEN' && f.score?.penalty) {
+                    const penHome = f.score.penalty.home;
+                    const penAway = f.score.penalty.away;
+                    if (penHome > penAway) winnerTeamId = homeTeam.id;
+                    if (penAway > penHome) winnerTeamId = awayTeam.id;
+                }
+
+                // Update Match Record
+                const match = await prisma.match.update({
+                    where: { id_api: apiMatchId },
+                    data: {
+                        home_score: f.goals.home,
+                        away_score: f.goals.away,
+                        status: currentStatus,
+                        winner_team_id: winnerTeamId
+                    }
                 });
 
-                const detailedFixtures = batchResponse.data.response || [];
+                // Track database season internal ID for performance averages calculations
+                const originalMatch = nsMatches.find(m => m.id_api === apiMatchId);
+                if (originalMatch) seasonsToRecalculate.add(originalMatch.season_id);
 
-                for (const f of detailedFixtures) {
-                    const apiMatchId = f.fixture.id.toString();
-                    const currentStatus = f.fixture.status.short;
-                    const isFinished = ['FT', 'AET', 'PEN'].includes(currentStatus);
+                // Group data for the streak function: Key looks like "7139-2024"
+                const leagueApiId = f.league.id;
+                const seasonYear = f.league.season;
+                uniqueStreaksMap.set(`${leagueApiId}-${seasonYear}`, [leagueApiId, seasonYear]);
 
-                    const homeTeam = await prisma.team.findUnique({ where: { id_api: f.teams.home.id.toString() } });
-                    const awayTeam = await prisma.team.findUnique({ where: { id_api: f.teams.away.id.toString() } });
-
-                    if (!homeTeam || !awayTeam) continue;
-
-                    let winnerTeamId = null;
-                    if (isFinished) {
-                        if (f.goals.home > f.goals.away) {
-                            winnerTeamId = homeTeam.id;
-                        } else if (f.goals.away > f.goals.home) {
-                            winnerTeamId = awayTeam.id;
-                        } else if (currentStatus === 'PEN' && f.score?.penalty) {
-                            // If regular goals are tied and it's a penalty status check penalty shootout goals
-                            const penHome = f.score.penalty.home;
-                            const penAway = f.score.penalty.away;
-                            if (penHome > penAway) winnerTeamId = homeTeam.id;
-                            if (penAway > penHome) winnerTeamId = awayTeam.id;
+                // ==========================================
+                // STATS PROCESSING (MARKETS LOGIC)
+                // ==========================================
+                const dbMarkets = await prisma.market.findMany({
+                    where: {
+                        slug: {
+                            in: [
+                                'team-goals', 'total-goals', 'team-yellow-cards',
+                                'total-yellow-cards', 'team-red-cards', 'total-red-cards',
+                                'team-corner-kicks', 'total-corner-kicks'
+                            ]
                         }
                     }
+                });
 
-                    // Update local match state
-                    const match = await prisma.match.upsert({
-                        where: { id_api: apiMatchId },
-                        update: {
-                            home_score: f.goals.home,
-                            away_score: f.goals.away,
-                            status: currentStatus,
-                            winner_team_id: winnerTeamId
-                        },
-                        // create: 
-                    });
+                const homeStatsArray = f.statistics?.find(s => s.team.id === f.teams.home.id)?.statistics || [];
+                const awayStatsArray = f.statistics?.find(s => s.team.id === f.teams.away.id)?.statistics || [];
 
-                    if (isFinished) {
-                        const matchedPending = activeMatches.find(m => m.id_api === apiMatchId);
-                        if (matchedPending) seasonsToRecalculate.add(matchedPending.season_id);
+                const getRawStatValue = (statsArray, typeString) => {
+                    const found = statsArray.find(s => s.type === typeString);
+                    return found ? (parseInt(found.value) || 0) : 0;
+                };
 
-                        const dbMarkets = await prisma.market.findMany({
-                            where: {
-                                slug: {
-                                    in: [
-                                        'team-goals', 'total-goals', 'team-yellow-cards',
-                                        'total-yellow-cards', 'team-red-cards', 'total-red-cards',
-                                        'team-corner-kicks', 'total-corner-kicks'
-                                    ]
-                                }
-                            }
-                        });
+                const homeGoals = f.goals.home ?? 0;
+                const awayGoals = f.goals.away ?? 0;
+                const homeYellows = getRawStatValue(homeStatsArray, 'Yellow Cards');
+                const awayYellows = getRawStatValue(awayStatsArray, 'Yellow Cards');
+                const homeReds = getRawStatValue(homeStatsArray, 'Red Cards');
+                const awayReds = getRawStatValue(awayStatsArray, 'Red Cards');
+                const homeCorners = getRawStatValue(homeStatsArray, 'Corner Kicks');
+                const awayCorners = getRawStatValue(awayStatsArray, 'Corner Kicks');
 
-                        const homeStatsArray = f.statistics?.find(s => s.team.id === f.teams.home.id)?.statistics || [];
-                        const awayStatsArray = f.statistics?.find(s => s.team.id === f.teams.away.id)?.statistics || [];
-
-                        const getRawStatValue = (statsArray, typeString) => {
-                            const found = statsArray.find(s => s.type === typeString);
-                            return found ? (parseInt(found.value) || 0) : 0;
-                        };
-
-                        const homeGoals = f.goals.home ?? 0;
-                        const awayGoals = f.goals.away ?? 0;
-                        const homeYellows = getRawStatValue(homeStatsArray, 'Yellow Cards');
-                        const awayYellows = getRawStatValue(awayStatsArray, 'Yellow Cards');
-                        const homeReds = getRawStatValue(homeStatsArray, 'Red Cards');
-                        const awayReds = getRawStatValue(awayStatsArray, 'Red Cards');
-                        const homeCorners = getRawStatValue(homeStatsArray, 'Corner Kicks');
-                        const awayCorners = getRawStatValue(awayStatsArray, 'Corner Kicks');
-
-                        for (const market of dbMarkets) {
-                            let finalValue = 0;
-                            if (market.slug === 'team-goals') {
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, homeGoals, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, awayGoals, 'away');
-                            } else if (market.slug === 'total-goals') {
-                                finalValue = homeGoals + awayGoals;
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
-                            } else if (market.slug === 'team-yellow-cards') {
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, homeYellows, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, awayYellows, 'away');
-                            } else if (market.slug === 'total-yellow-cards') {
-                                finalValue = homeYellows + awayYellows;
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
-                            } else if (market.slug === 'team-red-cards') {
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, homeReds, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, awayReds, 'away');
-                            } else if (market.slug === 'total-red-cards') {
-                                finalValue = homeReds + awayReds;
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
-                            } else if (market.slug === 'team-corner-kicks') {
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, homeCorners, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, awayCorners, 'away');
-                            } else if (market.slug === 'total-corner-kicks') {
-                                finalValue = homeCorners + awayCorners;
-                                await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
-                                await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
-                            }
-                        }
+                for (const market of dbMarkets) {
+                    let finalValue = 0;
+                    if (market.slug === 'team-goals') {
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, homeGoals, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, awayGoals, 'away');
+                    } else if (market.slug === 'total-goals') {
+                        finalValue = homeGoals + awayGoals;
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
+                    } else if (market.slug === 'team-yellow-cards') {
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, homeYellows, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, awayYellows, 'away');
+                    } else if (market.slug === 'total-yellow-cards') {
+                        finalValue = homeYellows + awayYellows;
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
+                    } else if (market.slug === 'team-red-cards') {
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, homeReds, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, awayReds, 'away');
+                    } else if (market.slug === 'total-red-cards') {
+                        finalValue = homeReds + awayReds;
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
+                    } else if (market.slug === 'team-corner-kicks') {
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, homeCorners, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, awayCorners, 'away');
+                    } else if (market.slug === 'total-corner-kicks') {
+                        finalValue = homeCorners + awayCorners;
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, finalValue, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, finalValue, 'away');
                     }
-                }
-            }
-
-            if (seasonsToRecalculate.size > 0) {
-                console.log(`Re-calculating season averages for completed games...`);
-                for (const seasonId of seasonsToRecalculate) {
-                    await generateSeasonAverages(seasonId);
                 }
             }
         }
 
-        const structuralPendingLeft = await prisma.match.findMany({
-            where: {
-                status: { notIn: ['FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'] }
-            },
-            select: {
-                status: true,
-                kickoff_at: true,
-                homeTeam: { select: { name: true } },
-                awayTeam: { select: { name: true } }
+        // ==========================================
+        // PHASE 3: PROCESS SEASON AVERAGES & STREAKS
+        // ==========================================
+
+        // 1. Recalculate rolling stats for seasons that had match updates
+        if (seasonsToRecalculate.size > 0) {
+            console.log(`📊 Recalculating performance averages...`);
+            for (const seasonId of seasonsToRecalculate) {
+                await generateSeasonAverages(seasonId);
             }
-        });
-
-        let globalWaitMinutes = 15;
-        let urgentMatchInfo = "No active matches monitored (Fallback)";
-
-        if (structuralPendingLeft.length > 0) {
-            let lowestMinutes = Infinity;
-
-            for (const m of structuralPendingLeft) {
-                const minutes = calculateMinutesUntilNextStatusChange(m.status, m.kickoff_at);
-
-                if (minutes < lowestMinutes) {
-                    lowestMinutes = minutes;
-                    const matchName = `${m.homeTeam?.name || 'Home'} vs ${m.awayTeam?.name || 'Away'}`;
-                    urgentMatchInfo = `Waiting for [${m.status}] ${matchName} (Kickoff Time: ${new Date(m.kickoff_at).toISOString()})`;
-                }
-            }
-            globalWaitMinutes = lowestMinutes;
         }
 
-        const rawWait = globalWaitMinutes;
-        globalWaitMinutes = Math.max(2, Math.min(globalWaitMinutes, 45));
+        // 2. Format unique combinations into an array of arrays and call streak function
+        if (uniqueStreaksMap.size > 0) {
+            const streakPayload = Array.from(uniqueStreaksMap.values());
+            // Result payload format: [[7139, 2024], [169, 2024]]
 
-        const capNotice = rawWait > 45 ? ` (Capped from ${rawWait} mins due to 45-min safety limit)` : '';
-
-        console.log(`Most Urgent Match: ${urgentMatchInfo}`);
-        console.log(`Next global run in ${globalWaitMinutes} minutes.${capNotice}`);
-
-        setTimeout(smartUpdateOrchestrator, globalWaitMinutes * 60 * 1000);
+            await startStreakWorker(streakPayload);
+        }
 
     } catch (error) {
-        console.error('Engine error context failed:', error.message);
-        // On crash, wait 5 minutes before restarting the automation cycle safely
-        setTimeout(smartUpdateOrchestrator, 5 * 60 * 1000);
+        console.error('❌ Error during update cycle:', error.message);
     } finally {
         await prisma.$disconnect();
+        console.log('⏰ Cycle finished. Waiting 10 minutes for next check...');
+        setTimeout(simplifiedUpdateOrchestrator, 10 * 60 * 1000);
     }
 }
 
@@ -269,7 +261,7 @@ async function upsertMatchStat(matchId, teamId, marketId, value, side) {
 
 async function generateSeasonAverages(seasonId) {
     const stats = await prisma.matchTeamStat.findMany({
-        where: { match: { season_id: seasonId } }
+        where: { match: { season_id: seasonId, status: { in: ['FT', 'AET', 'PEN'] } } }
     });
 
     const breakdown = {};
@@ -328,5 +320,5 @@ async function generateSeasonAverages(seasonId) {
     }
 }
 
-// Start execution loop
-smartUpdateOrchestrator();
+// Kickstart script execution loop
+simplifiedUpdateOrchestrator();

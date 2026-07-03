@@ -7,6 +7,8 @@ let currentAveragesData = [];
 let currentMatchdaysData = [];
 let activeTab = 'matchday-container';
 let activeUpcomingFilter = 'team';
+let allLeaguesData = null;
+let globalInsightVariable = null;
 let tabs = {
     currTeamMarket: false,
     ftMatches: false,
@@ -15,10 +17,13 @@ let tabs = {
 }
 
 
+let selectedLeagues = [];
+
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         const response = await fetch(`${API_URL}/leagues`);
         const result = await response.json();
+        allLeaguesData = result?.data;
         if (!result.success) throw new Error(result.message);
 
         const leaguesContainer = document.getElementById('leaguesContainer');
@@ -26,8 +31,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <div class="border border-gray-100 rounded-lg overflow-hidden bg-white mb-1">
                         <button onclick="toggleLeagueDropdown(${l.id}, '${l.name.replace(/'/g, "\\'")}')"
                             id="league-btn-${l.id}"
+                            data-league-name="${l.name}"
                             class="w-full text-left bg-white hover:bg-gray-50 px-3 py-2.5 text-xs font-semibold transition-all flex justify-between items-center text-gray-700 border-b border-transparent">
-                            <span>${l.name} ${l?.country}</span>
+                            
+                            <span class="flex items-center gap-2">
+                                <!-- Dynamic Checkbox Input for Filtering -->
+                                <input type="checkbox" 
+                                    id="league-chk-${l.id}"
+                                    onclick="toggleLeagueSelection(event, '${l.name.replace(/'/g, "\\'")}', ${l.id})"
+                                    class="w-3.5 h-3.5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 cursor-pointer mr-0.5">
+                                
+                                <span>${l.name} ${l?.country || ''}</span>
+                                <span id="sidebar-count-${l.id}" class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full text-[9px] font-bold">0</span>
+                            </span>
+                            
                             <span id="arrow-${l.id}" class="text-[10px] text-gray-400 transform transition-transform duration-200">&darr;</span>
                         </button>
                         <div id="dropdown-seasons-${l.id}" class="hidden bg-gray-50/50 px-2 py-1.5 space-y-1 border-t border-gray-150">
@@ -35,6 +52,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                         </div>
                     </div>
                 `).join('');
+
+        document.getElementById('dashboardPlaceholder').classList.add('hidden');
+        document.getElementById('openAllMArketsBtn').click();
     } catch (err) {
         document.getElementById('leaguesContainer').innerHTML = `<div class="text-xs text-red-500 p-2">Error structural config loading.</div>`;
     }
@@ -73,6 +93,29 @@ document.getElementById('team-games').addEventListener('click', () => {
         teamId: selectedTeamId,
         seasonYear: selectedSeasonYear
     })
+})
+document.getElementById('openAllMArketsBtn').addEventListener('click', async () => {
+    console.log('allLeaguesData', allLeaguesData)
+    let AllLeaguesResults = { data: [] };
+    const availableSeason = '2026';
+    for (let index = 0; index < allLeaguesData.length; index++) {
+        let leagueId = allLeaguesData[index]?.id;
+        const params = new URLSearchParams({ season: availableSeason });
+        if (leagueId) params.append('leagueId', leagueId);
+
+        const response = await fetch(`${API_URL}/upcoming-games?${params.toString()}`);
+        const result = await response.json();
+        console.log(result);
+        AllLeaguesResults.data.push(...(result.data));
+    }
+
+    console.log(AllLeaguesResults);
+    document.getElementById('dashboardPlaceholder').classList.add('hidden');
+    document.getElementById('dashboardDataGrid').classList.remove('hidden');
+    document.getElementById('navContainer').style.display = 'none'
+    openTab('upcoming-matches-container')
+
+    handleUpComingMatchesUi(AllLeaguesResults)
 })
 
 function updateUpcomingFilterUI(activeFilter) {
@@ -324,6 +367,7 @@ function setActiveTabButton(activeId) {
 async function selectTeam(teamId, teamName) {
     selectedTeamId = teamId;
     console.log('Selected Team ID:', teamId, 'Selected Season ID:', selectedSeasonId);
+    document.getElementById('navContainer').style.display = 'block'
     document.querySelectorAll('[id^="team-card-"]').forEach(b => b.classList.remove('border-blue-500', 'bg-blue-50/50', 'text-blue-600'));
     const selectedBlock = document.getElementById(`team-card-${teamId}`);
     if (selectedBlock) selectedBlock.classList.add('border-blue-500', 'bg-blue-50/50', 'text-blue-600');
@@ -524,12 +568,12 @@ async function selectTeam(teamId, teamName) {
     } catch (error) {
         alert("Could not load dashboard content blocks");
     }
-    openTab('matchday-container');
+    openTab('upcoming-matches-container');
 }
+
 async function toggleLeagueDropdown(leagueId, leagueName) {
     const dropdown = document.getElementById(`dropdown-seasons-${leagueId}`);
     const arrow = document.getElementById(`arrow-${leagueId}`);
-
     if (activeOpenLeagueId === leagueId && !dropdown.classList.contains('hidden')) {
         dropdown.classList.add('hidden');
         arrow.classList.remove('rotate-180');
@@ -563,11 +607,15 @@ async function toggleLeagueDropdown(leagueId, leagueName) {
                         <div id="season-teams-container-${s.id}" class="hidden pl-1.5 py-1 space-y-1 flex flex-col bg-gray-100/40 border border-gray-100/70 rounded"></div>
                     </div>
                 `).join('');
+
+
     } catch (err) {
         dropdown.innerHTML = `<div class="text-xs text-red-500 p-1">Failed to fetch periods.</div>`;
     }
 }
+
 async function selectSeason(event, seasonId, seasonName, leagueName) {
+
     event.stopPropagation();
     selectedSeasonId = seasonId;
     selectedSeasonYear = seasonName;
@@ -762,117 +810,278 @@ async function fetchAndRenderUpcomingMatches({ leagueId, teamId, seasonYear }) {
         if (teamId) params.append('teamId', teamId);
         const response = await fetch(`${API_URL}/upcoming-games?${params.toString()}`);
         const result = await response.json();
+        handleUpComingMatchesUi(result);
+    } catch (err) {
+        console.error("Error loading insights:", err);
+        container.innerHTML = `<div class="p-4 text-xs text-red-500">Failed to load insights.</div>`;
+    }
+}
 
-        if (!result.success || !result.data || result.data.length === 0) {
-            container.innerHTML = `<div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 italic">No insights found.</div>`;
-            return;
+function handleUpComingMatchesUi(result) {
+    console.log('handleUpComingMatchesUi', result)
+    const container = document.getElementById('upcoming-matches-container');
+    container.innerHTML = `<div class="p-8 text-center text-gray-400"><div class="animate-pulse">Loading analysis...</div></div>`;
+
+    const insights = [];
+
+    // --- Helper: Find the specific odd ---
+    const getOddForPrediction = (market, direction, val) => {
+        const searchStr = `${direction.toLowerCase()}-${val}`;
+        const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
+        return found ? found.odd : null;
+    };
+
+    // 1. Flatten Data
+    result.data.forEach(match => {
+        const homeOddObj = match.matchWinnerOdds?.find(o => o.selection === 'home');
+        const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
+
+        match.marketData.forEach(m => {
+            if (m.home?.streak?.length >= 3) {
+                const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
+
+                insights.push({
+                    match, isHome: true, market: m,
+                    homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                    streakCount: m.home.streak.length,
+                    suggestedValue: m.home.suggestedValue,
+                    avgValue: m.home.avg_value,
+                    direction,
+                    specificOdd
+                });
+            }
+            if (m.away?.streak?.length >= 3) {
+                const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
+
+                insights.push({
+                    match, isHome: false, market: m,
+                    homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                    streakCount: m.away.streak.length,
+                    suggestedValue: m.away.suggestedValue,
+                    avgValue: m.away.avg_value,
+                    direction,
+                    specificOdd
+                });
+            }
+        });
+    });
+
+    // 2. Sort by Streak
+    insights.sort((a, b) => b.streakCount - a.streakCount);
+
+    if (insights.length === 0) {
+        container.innerHTML = `<div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 italic">No insights found.</div>`;
+        return;
+    }
+
+    // 3. Get master unique lists so badge positions stay fixed
+    const allMarkets = [...new Set(insights.map(i => i.market.marketSlug.replace(/-/g, ' ').toUpperCase()))].sort();
+    const allLeagues = [...new Set(insights.map(i => i.match.league?.name || i.match.league_name || 'OTHER LEAGUE'))].sort();
+
+    const leagueMarketCounts = {};
+    allLeagues.forEach(league => {
+        // Simply filter and count every single insight belonging to this league
+        const totalResults = insights.filter(i => {
+            const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
+            return leagueName === league;
+        }).length;
+
+        leagueMarketCounts[league] = totalResults;
+    });
+
+    // Store globally
+    window.leagueMarketCounts = leagueMarketCounts;
+    console.log('League total result counts:', leagueMarketCounts);
+    updateSidebarUiStates();
+    // --- Dynamic Sidebar UI Update ---
+    document.querySelectorAll('[data-league-name]').forEach(btn => {
+        const leagueName = btn.dataset.leagueName;
+        const leagueId = btn.id.replace('league-btn-', '');
+        const badge = document.getElementById(`sidebar-count-${leagueId}`);
+
+        if (badge) {
+            badge.textContent = leagueMarketCounts[leagueName] || 0;
         }
+    });
+    // Store globally
+    window.leagueMarketCounts = leagueMarketCounts;
+    console.log('League total result counts:', leagueMarketCounts);
+    // State for selected filters
+    let selectedMarkets = [];
 
-        const insights = [];
+    // 4. Reactive Render Function
+    const render = () => {
+        // --- Dynamic Summary Count Calculations ---
+        const marketCounts = {};
+        const leagueCounts = {};
+        allMarkets.forEach(m => marketCounts[m] = 0);
+        allLeagues.forEach(l => leagueCounts[l] = 0);
 
-        // --- Helper: Find the specific odd ---
-        const getOddForPrediction = (market, direction, val) => {
-            // Converts "11.5" and "OVER" to "over-11.5"
-            const searchStr = `${direction.toLowerCase()}-${val}`;
-            const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
-            return found ? found.odd : null;
-        };
-
-        // 1. Flatten Data
-        result.data.forEach(match => {
-            const homeOddObj = match.matchWinnerOdds?.find(o => o.selection === 'home');
-            const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
-
-            match.marketData.forEach(m => {
-                // console.log('directions', m?.home?.streak.direction, m?.away?.streak.direction)
-                // Process Home
-                if (m.home?.streak?.length >= 3) { // Filter: Streak 3 and above
-                    const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
-                    const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
-
-                    insights.push({
-                        match, isHome: true, market: m,
-                        homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
-                        streakCount: m.home.streak.length,
-                        suggestedValue: m.home.suggestedValue,
-                        avgValue: m.home.avg_value,
-                        direction,
-                        specificOdd
-                    });
-                }
-                // Process Away
-                if (m.away?.streak?.length >= 3) { // Filter: Streak 3 and above
-                    const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
-                    const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
-
-                    insights.push({
-                        match, isHome: false, market: m,
-                        homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
-                        streakCount: m.away.streak.length,
-                        suggestedValue: m.away.suggestedValue,
-                        avgValue: m.away.avg_value,
-                        direction,
-                        specificOdd
-                    });
-                }
-            });
+        // Calculate Market counts (respecting active League filters)
+        insights.forEach(i => {
+            const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
+            if (selectedLeagues.length === 0 || selectedLeagues.includes(leagueName)) {
+                const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+                marketCounts[marketName]++;
+            }
         });
 
-        // 2. Sort by Streak
-        insights.sort((a, b) => b.streakCount - a.streakCount);
-
-        // 3. Render
-        container.innerHTML = `
-            <div class="space-y-4">
-                ${insights.map(i => {
+        // Calculate League counts (respecting active Market filters)
+        insights.forEach(i => {
             const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
-            const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
-            const fullPrediction = `${i.direction} ${i.suggestedValue}`;
+            if (selectedMarkets.length === 0 || selectedMarkets.includes(marketName)) {
+                const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
+                leagueCounts[leagueName]++;
+            }
+        });
+
+        // Get final list matching BOTH criteria
+        const filteredInsights = insights.filter(i => {
+            const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+            const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
+
+            const matchesMarket = selectedMarkets.length === 0 || selectedMarkets.includes(marketName);
+            const matchesLeague = selectedLeagues.length === 0 || selectedLeagues.includes(leagueName);
+
+            return matchesMarket && matchesLeague;
+        });
+
+        const isAnyFilterActive = selectedMarkets.length > 0 || selectedLeagues.length > 0;
+
+        globalInsightVariable = insights;
+        const summaryHtml = `
+            <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col gap-3 mb-4 relative">
+                <!-- Market Row -->
+                <div class="flex flex-wrap gap-2 items-center">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">Markets:</span>
+                    <div class="flex flex-wrap gap-2 flex-grow">
+                        ${Object.entries(marketCounts).map(([name, count]) => {
+            const isSelected = selectedMarkets.includes(name);
+            const badgeClass = isSelected
+                ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                : count === 0
+                    ? 'bg-white border-gray-100 text-gray-300 opacity-40 pointer-events-none'
+                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100';
+            const countClass = isSelected ? 'bg-white text-blue-600' : 'bg-blue-600 text-white';
 
             return `
-                    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all">
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                            <div class="md:col-span-2 flex items-center justify-between bg-gray-50/50 p-4 rounded-lg">
-                                <div class="flex flex-col items-center w-1/3">
-                                    <img src="${i.match.homeTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
-                                    <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.homeTeam.name}</div>
-                                    <div class="mt-1 text-[10px] font-bold ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.homeOdd}</div>
+                                <div data-market-name="${name}" class="market-badge border rounded-full px-3 py-1 flex items-center gap-2 text-[10px] font-black cursor-pointer select-none transition-all ${badgeClass}">
+                                    <span>${name}</span>
+                                    <span class="${countClass} px-1.5 py-0.5 rounded-full text-[9px]">${count}</span>
                                 </div>
-                                <div
-                                 data-home-id="${i.match.homeTeam.id}" data-away-id="${i.match.awayTeam.id}"
-                                 data-market="${i.market.marketSlug}"
-                                 data-is-home="${i.isHome}"
-                                 data-home-streak='${JSON.stringify(i.market.home.streak || [])}'
-                                 data-away-streak='${JSON.stringify(i.market.away.streak || [])}'
-                                
-                                class=" streak-container flex flex-col items-center flex-grow">
-                                    <div class="text-xs font-black text-red-600">${i.streakCount} IN A ROW</div>
-                                    <div class="text-[9px] text-gray-400 mt-1 uppercase">${new Date(i.match.kickoff_at).toLocaleDateString()}</div>
-                                </div>
-                                <div class="flex flex-col items-center w-1/3">
-                                    <img src="${i.match.awayTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
-                                    <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.awayTeam.name}</div>
-                                    <div class="mt-1 text-[10px] font-bold ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.awayOdd}</div>
-                                </div>
-                            </div>
-
-                            <div class="pl-2">
-                                <div class="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prediction: ${marketName}</div>
-                                <div class="flex items-center gap-2 mb-1">
-                                    <div class="text-xl font-black text-gray-800">${fullPrediction}</div>
-                                    ${i.specificOdd ? `<div class="bg-green-600 text-white text-[10px] px-2 py-1 rounded font-bold">${i.specificOdd}</div>` : ''}
-                                </div>
-                                <p class="text-[10px] text-gray-500 italic">
-                                    In the last <b>${i.streakCount}</b> matches, <b>${marketName} ${fullPrediction}</b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
-                                </p>
-                            </div>
-                        </div>
+                            `;
+        }).join('')}
                     </div>
-                `}).join('')}
+                </div>
+
+
+                
+                ${isAnyFilterActive ? `
+                    <button id="btn-show-all" class="absolute top-4 right-4 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold text-[10px] px-3 py-1 rounded-full shadow-sm transition-all uppercase tracking-wider">
+                        Show All
+                    </button>
+                ` : ''}
             </div>
         `;
 
-        // At the end of fetchAndRenderUpcomingMatches, after setting innerHTML
+        // Render card layout elements
+        container.innerHTML = `
+            <div class="space-y-4">
+                ${summaryHtml}
+                ${filteredInsights.length === 0 ? `
+                    <div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 italic">No matches match the selected criteria.</div>
+                ` : filteredInsights.map(i => {
+            const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+            const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
+            const fullPrediction = `${i.direction} ${i.suggestedValue}`;
+            const leagueLabel = i.match.league?.name || i.match.league_name || '';
+
+            return `
+                        <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                                <div class="md:col-span-2 flex items-center justify-between bg-gray-50/50 p-4 rounded-lg relative">
+                                    ${leagueLabel ? `<span class="absolute top-1 left-2 text-[8px] font-bold text-gray-400 uppercase tracking-wider">${leagueLabel}</span>` : ''}
+                                    
+                                    <div class="flex flex-col items-center w-1/3 mt-2">
+                                        <img src="${i.match.homeTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
+                                        <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.homeTeam.name}</div>
+                                        <div class="mt-1 text-[10px] font-bold ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.homeOdd}</div>
+                                    </div>
+                                    <div
+                                     data-home-id="${i.match.homeTeam.id}" data-away-id="${i.match.awayTeam.id}"
+                                     data-market="${i.market.marketSlug}"
+                                     data-is-home="${i.isHome}"
+                                     data-home-streak='${JSON.stringify(i.market.home.streak || [])}'
+                                     data-away-streak='${JSON.stringify(i.market.away.streak || [])}'
+                                    class="streak-container flex flex-col items-center flex-grow cursor-pointer mt-2">
+                                        <div class="text-xs font-black text-red-600">${i.streakCount} IN A ROW</div>
+                                        <div class="text-[9px] text-gray-400 mt-1 uppercase">${new Date(i.match.kickoff_at).toLocaleDateString()}</div>
+                                    </div>
+                                    <div class="flex flex-col items-center w-1/3 mt-2">
+                                        <img src="${i.match.awayTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
+                                        <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.awayTeam.name}</div>
+                                        <div class="mt-1 text-[10px] font-bold ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.awayOdd}</div>
+                                    </div>
+                                </div>
+
+                                <div class="pl-2">
+                                    <div class="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prediction: ${marketName}</div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <div class="text-xl font-black text-gray-800">${fullPrediction}</div>
+                                        ${i.specificOdd ? `<div class="bg-green-600 text-white text-[10px] px-2 py-1 rounded font-bold">${i.specificOdd}</div>` : ''}
+                                    </div>
+                                    <p class="text-[10px] text-gray-500 italic">
+                                        In the last <b>${i.streakCount}</b> matches, <b>${marketName} ${fullPrediction}</b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+        }).join('')}
+            </div>
+        `;
+
+        // Bind Market clicks
+        container.querySelectorAll('.market-badge').forEach(badge => {
+            badge.addEventListener('click', () => {
+                const marketName = badge.dataset.marketName;
+                if (selectedMarkets.includes(marketName)) {
+                    selectedMarkets = selectedMarkets.filter(m => m !== marketName);
+                } else {
+                    selectedMarkets.push(marketName);
+                }
+                render();
+            });
+        });
+
+        // Bind League clicks (Safely processes empty nodelist if row is hidden)
+        container.querySelectorAll('.league-badge').forEach(badge => {
+            badge.addEventListener('click', () => {
+                console.log(selectedLeagues)
+                const leagueName = badge.dataset.leagueName;
+                if (selectedLeagues.includes(leagueName)) {
+                    selectedLeagues = selectedLeagues.filter(l => l !== leagueName);
+                } else {
+                    selectedLeagues.push(leagueName);
+                }
+                render();
+            });
+        });
+
+        // Bind "Show All" click
+        const showAllBtn = container.querySelector('#btn-show-all');
+        if (showAllBtn) {
+            showAllBtn.addEventListener('click', () => {
+                selectedMarkets = [];
+                selectedLeagues = [];
+                updateSidebarUiStates();
+                render();
+            });
+        }
+
+        // Bind Pop-up handlers
         container.querySelectorAll('.streak-container').forEach(el => {
             el.addEventListener('click', async () => {
                 let awayId = el.dataset.awayId;
@@ -883,27 +1092,122 @@ async function fetchAndRenderUpcomingMatches({ leagueId, teamId, seasonYear }) {
 
                 const awayTeamData = await fetch(`${API_URL}/dashboard?teamId=${awayId}&seasonId=${selectedSeasonId}`);
                 const awayTeamResults = await awayTeamData.json();
-                console.log(awayTeamResults);
 
                 const homeTeamData = await fetch(`${API_URL}/dashboard?teamId=${homeId}&seasonId=${selectedSeasonId}`);
                 const homeTeamResults = await homeTeamData.json();
-                console.log(homeTeamResults);
-
-                console.log('Streak clicked! IDs: ' + el.dataset.homeId + ' ' + el.dataset.awayId) + ' ' + selectedSeasonId;
-
-
-
-                console.log(homeStreak);
-                console.log(awayStreak);
-                console.log(market);
 
                 handleStreakPopUp(homeTeamResults?.data, awayTeamResults?.data, market, homeStreak, awayStreak);
             });
         });
-
-
-    } catch (err) {
-        console.error("Error loading insights:", err);
-        container.innerHTML = `<div class="p-4 text-xs text-red-500">Failed to load insights.</div>`;
-    }
+    };
+    window.refreshInsightsDashboard = render;
+    render();
 }
+
+
+function updateSidebarStyles() {
+    document.querySelectorAll('[data-league-name]').forEach(btn => {
+        const name = btn.dataset.leagueName;
+        const id = btn.id.replace('league-btn-', '');
+        const badge = document.getElementById(`sidebar-count-${id}`);
+        const isSelected = selectedLeagues.includes(name);
+
+        btn.classList.remove('bg-purple-50', 'text-purple-700', 'border-purple-300', 'bg-white', 'text-gray-700', 'border-transparent');
+        if (badge) {
+            badge.classList.remove('bg-purple-600', 'text-white', 'bg-gray-100', 'text-gray-500');
+        }
+
+        if (isSelected) {
+            btn.classList.add('bg-purple-50', 'text-purple-700', 'border-purple-300');
+            if (badge) badge.classList.add('bg-purple-600', 'text-white');
+        } else {
+            btn.classList.add('bg-white', 'text-gray-700', 'border-transparent');
+            if (badge) badge.classList.add('bg-gray-100', 'text-gray-500');
+        }
+    });
+}
+// Global function to sync checkboxes, counts, and active purple styling states
+function updateSidebarUiStates() {
+    document.querySelectorAll('[data-league-name]').forEach(btn => {
+        const name = btn.dataset.leagueName;
+        const id = btn.id.replace('league-btn-', '');
+        const badge = document.getElementById(`sidebar-count-${id}`);
+        const checkbox = document.getElementById(`league-chk-${id}`);
+
+        const isSelected = selectedLeagues.includes(name);
+
+        // 1. Sync Checkbox State
+        if (checkbox) {
+            checkbox.checked = isSelected;
+        }
+
+        // 2. Sync Count Numbers
+        if (badge && window.leagueMarketCounts) {
+            badge.textContent = window.leagueMarketCounts[name] || 0;
+        }
+
+        // 3. Sync Component Theme Styles
+        if (isSelected) {
+            btn.classList.add('bg-purple-50', 'text-purple-700', 'border-purple-300');
+            btn.classList.remove('bg-white', 'text-gray-700', 'border-transparent');
+            if (badge) {
+                badge.classList.add('bg-purple-600', 'text-white');
+                badge.classList.remove('bg-gray-100', 'text-gray-500');
+            }
+        } else {
+            btn.classList.add('bg-white', 'text-gray-700', 'border-transparent');
+            btn.classList.remove('bg-purple-50', 'text-purple-700', 'border-purple-300');
+            if (badge) {
+                badge.classList.add('bg-gray-100', 'text-gray-500');
+                badge.classList.remove('bg-purple-600', 'text-white');
+            }
+        }
+    });
+}
+
+// Checkbox click filter controller
+function toggleLeagueSelection(event, leagueName, leagueId) {
+    event.stopPropagation(); // Prevents the dropdown wrapper accordion from opening/closing
+
+    const isChecked = event.target.checked;
+
+    if (isChecked) {
+        if (!selectedLeagues.includes(leagueName)) {
+            selectedLeagues.push(leagueName);
+        }
+    } else {
+        selectedLeagues = selectedLeagues.filter(l => l !== leagueName);
+    }
+
+    updateSidebarUiStates();
+    refreshInsightsDashboard();
+}
+
+// setInterval(() => {
+//     console.log(globalInsightVariable)
+// }, 5000);
+
+//         <!-- League Row (Only displays if multiple leagues exist) -->
+//         ${allLeagues.length > 1 ? `
+//             <div class="flex flex-wrap gap-2 items-center border-t border-gray-200/60 pt-2.5">
+//                 <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">Leagues:</span>
+//                 <div class="flex flex-wrap gap-2 flex-grow">
+//                     ${Object.entries(leagueCounts).map(([name, count]) => {
+//     const isSelected = selectedLeagues.includes(name);
+//     const badgeClass = isSelected
+//         ? 'bg-purple-600 border-purple-600 text-white shadow-sm'
+//         : count === 0
+//             ? 'bg-white border-gray-100 text-gray-300 opacity-40 pointer-events-none'
+//             : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100';
+//     const countClass = isSelected ? 'bg-white text-purple-600' : 'bg-purple-600 text-white';
+
+//     return `
+//                             <div data-league-name="${name}" class="league-badge border rounded-full px-3 py-1 flex items-center gap-2 text-[10px] font-black cursor-pointer select-none transition-all ${badgeClass}">
+//                                 <span>${name}</span>
+//                                 <span class="${countClass} px-1.5 py-0.5 rounded-full text-[9px]">${count}</span>
+//                             </div>
+//                         `;
+// }).join('')}
+//                 </div>
+//             </div>
+//         ` : ''}
