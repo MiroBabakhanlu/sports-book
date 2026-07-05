@@ -19,6 +19,8 @@ let tabs = {
 
 let selectedLeagues = [];
 
+let filterByLeague = null;
+
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         const response = await fetch(`${API_URL}/leagues`);
@@ -38,8 +40,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 <!-- Dynamic Checkbox Input for Filtering -->
                                 <input type="checkbox" 
                                     id="league-chk-${l.id}"
-                                    onclick="toggleLeagueSelection(event, '${l.name.replace(/'/g, "\\'")}', ${l.id})"
-                                    class="w-3.5 h-3.5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 cursor-pointer mr-0.5">
+                                    data-league-id="${l.id}"
+                                    class="league-filter-chk w-3.5 h-3.5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 cursor-pointer mr-0.5">
                                 
                                 <span>${l.name} ${l?.country || ''}</span>
                                 <span id="sidebar-count-${l.id}" class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full text-[9px] font-bold">0</span>
@@ -52,6 +54,40 @@ document.addEventListener('DOMContentLoaded', async () => {
                         </div>
                     </div>
                 `).join('');
+
+        // --- Event Listener for Checkboxes ---
+        leaguesContainer.querySelectorAll('.league-filter-chk').forEach(chk => {
+            chk.addEventListener('click', (e) => {
+                if (neededDataForUpCOmmingGames) {
+                    handleUpComingMatchesUi(neededDataForUpCOmmingGames)
+                }
+
+                // Prevents the button's onclick event from triggering the dropdown
+                e.stopPropagation();
+
+                const leagueId = parseInt(chk.dataset.leagueId);
+
+                if (chk.checked) {
+                    filterByLeague = leagueId;
+
+                    // Uncheck all other checkboxes to ensure single selection
+                    leaguesContainer.querySelectorAll('.league-filter-chk').forEach(otherChk => {
+                        if (otherChk !== chk) otherChk.checked = false;
+                    });
+                } else {
+                    // If the current active checkbox is unticked, clear the filter variable
+                    if (filterByLeague === leagueId) {
+                        filterByLeague = null;
+                    }
+                }
+                if (typeof window.refreshInsightsDashboard === 'function') {
+                    window.refreshInsightsDashboard();
+                }
+
+                console.log('Selected League ID Filter:', filterByLeague);
+
+            });
+        });
 
         document.getElementById('dashboardPlaceholder').classList.add('hidden');
         document.getElementById('openAllMArketsBtn').click();
@@ -94,6 +130,8 @@ document.getElementById('team-games').addEventListener('click', () => {
         seasonYear: selectedSeasonYear
     })
 })
+
+let neededDataForUpCOmmingGames = null;
 document.getElementById('openAllMArketsBtn').addEventListener('click', async () => {
     console.log('allLeaguesData', allLeaguesData)
     let AllLeaguesResults = { data: [] };
@@ -110,13 +148,88 @@ document.getElementById('openAllMArketsBtn').addEventListener('click', async () 
     }
 
     console.log(AllLeaguesResults);
+    neededDataForUpCOmmingGames = AllLeaguesResults;
     document.getElementById('dashboardPlaceholder').classList.add('hidden');
     document.getElementById('dashboardDataGrid').classList.remove('hidden');
     document.getElementById('navContainer').style.display = 'none'
     openTab('upcoming-matches-container')
 
+
+    const insights = [];
+
+    AllLeaguesResults.data.forEach(match => {
+        const homeOddObj = match.matchWinnerOdds?.find(o => o.selection === 'home');
+        const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
+
+        match.marketData.forEach(m => {
+            if (m.home?.streak?.length >= 3) {
+                const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
+
+                insights.push({
+                    match, isHome: true, market: m,
+                    homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                    streakCount: m.home.streak.length,
+                    suggestedValue: m.home.suggestedValue,
+                    avgValue: m.home.avg_value,
+                    direction,
+                    specificOdd
+                });
+            }
+            if (m.away?.streak?.length >= 3) {
+                const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
+
+                insights.push({
+                    match, isHome: false, market: m,
+                    homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                    streakCount: m.away.streak.length,
+                    suggestedValue: m.away.suggestedValue,
+                    avgValue: m.away.avg_value,
+                    direction,
+                    specificOdd
+                });
+            }
+        });
+    });
+    insights.sort((a, b) => b.streakCount - a.streakCount);
     handleUpComingMatchesUi(AllLeaguesResults)
+    let leagueMarketCounts = calculateLeagueMarketCounts(insights);
+    console.log(leagueMarketCounts)
+    // --- Insert counts next to the correct league name using IDs ---
+    allLeaguesData.forEach(league => {
+        const countSpan = document.getElementById(`sidebar-count-${league.id}`);
+        console.log(countSpan);
+        if (countSpan) {
+            const count = leagueMarketCounts[league.id] || 0;
+            countSpan.textContent = count;
+        }
+    });
 })
+
+function calculateLeagueMarketCounts(insights) {
+    if (!insights || !Array.isArray(insights)) return {};
+
+    const leagueMarketCounts = {};
+
+    // 1. Get the master unique list of league IDs
+    const allLeagueIds = [...new Set(insights.map(i =>
+        i.match.league?.id || i.match.league_id || 'OTHER_LEAGUE'
+    ))];
+
+    // 2. Count occurrences for each league ID
+    allLeagueIds.forEach(id => {
+        const totalResults = insights.filter(i => {
+            const currentId = i.match.league?.id || i.match.league_id || 'OTHER_LEAGUE';
+            return currentId === id;
+        }).length;
+
+        leagueMarketCounts[id] = totalResults;
+    });
+
+    return leagueMarketCounts;
+}
+
 
 function updateUpcomingFilterUI(activeFilter) {
     const leagueSpan = document.getElementById('league-games');
@@ -366,6 +479,13 @@ function setActiveTabButton(activeId) {
 
 async function selectTeam(teamId, teamName) {
     selectedTeamId = teamId;
+    filterByLeague = null;
+
+    // 3. Uncheck all UI checkboxes in the sidebar
+    document.querySelectorAll('.league-filter-chk').forEach(chk => {
+        chk.checked = false;
+    });
+
     console.log('Selected Team ID:', teamId, 'Selected Season ID:', selectedSeasonId);
     document.getElementById('navContainer').style.display = 'block'
     document.querySelectorAll('[id^="team-card-"]').forEach(b => b.classList.remove('border-blue-500', 'bg-blue-50/50', 'text-blue-600'));
@@ -817,6 +937,7 @@ async function fetchAndRenderUpcomingMatches({ leagueId, teamId, seasonYear }) {
     }
 }
 
+
 function handleUpComingMatchesUi(result) {
     console.log('handleUpComingMatchesUi', result)
     const container = document.getElementById('upcoming-matches-container');
@@ -876,79 +997,63 @@ function handleUpComingMatchesUi(result) {
         return;
     }
 
-    // 3. Get master unique lists so badge positions stay fixed
+    // 3. Get master unique lists for markets
     const allMarkets = [...new Set(insights.map(i => i.market.marketSlug.replace(/-/g, ' ').toUpperCase()))].sort();
-    const allLeagues = [...new Set(insights.map(i => i.match.league?.name || i.match.league_name || 'OTHER LEAGUE'))].sort();
 
-    const leagueMarketCounts = {};
-    allLeagues.forEach(league => {
-        // Simply filter and count every single insight belonging to this league
-        const totalResults = insights.filter(i => {
-            const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
-            return leagueName === league;
-        }).length;
-
-        leagueMarketCounts[league] = totalResults;
-    });
-
-    // Store globally
-    window.leagueMarketCounts = leagueMarketCounts;
-    console.log('League total result counts:', leagueMarketCounts);
-    updateSidebarUiStates();
-    // --- Dynamic Sidebar UI Update ---
-    document.querySelectorAll('[data-league-name]').forEach(btn => {
-        const leagueName = btn.dataset.leagueName;
-        const leagueId = btn.id.replace('league-btn-', '');
-        const badge = document.getElementById(`sidebar-count-${leagueId}`);
-
-        if (badge) {
-            badge.textContent = leagueMarketCounts[leagueName] || 0;
-        }
-    });
-    // Store globally
-    window.leagueMarketCounts = leagueMarketCounts;
-    console.log('League total result counts:', leagueMarketCounts);
-    // State for selected filters
+    // State for selected filters and pagination
     let selectedMarkets = [];
+    let currentPage = 1;
+    const itemsPerPage = 10;
+
+    // Keep track of the external league filter to know when it changes
+    let lastLeagueFilter = typeof filterByLeague !== 'undefined' ? filterByLeague : null;
 
     // 4. Reactive Render Function
     const render = () => {
+        // --- Reset page to 1 if the external league filter changed ---
+        if (typeof filterByLeague !== 'undefined' && filterByLeague !== lastLeagueFilter) {
+            currentPage = 1;
+            lastLeagueFilter = filterByLeague;
+        }
+
         // --- Dynamic Summary Count Calculations ---
         const marketCounts = {};
-        const leagueCounts = {};
         allMarkets.forEach(m => marketCounts[m] = 0);
-        allLeagues.forEach(l => leagueCounts[l] = 0);
 
-        // Calculate Market counts (respecting active League filters)
+        // Calculate Market counts (respecting the global filterByLeague)
         insights.forEach(i => {
-            const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
-            if (selectedLeagues.length === 0 || selectedLeagues.includes(leagueName)) {
+            const leagueId = i.match.league_id || i.match.league?.id;
+            if (typeof filterByLeague === 'undefined' || filterByLeague === null || filterByLeague === leagueId) {
                 const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
                 marketCounts[marketName]++;
             }
         });
 
-        // Calculate League counts (respecting active Market filters)
-        insights.forEach(i => {
-            const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
-            if (selectedMarkets.length === 0 || selectedMarkets.includes(marketName)) {
-                const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
-                leagueCounts[leagueName]++;
-            }
-        });
-
-        // Get final list matching BOTH criteria
+        // Get final list matching BOTH criteria (Markets + Global League Filter)
         const filteredInsights = insights.filter(i => {
             const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
-            const leagueName = i.match.league?.name || i.match.league_name || 'OTHER LEAGUE';
+            const leagueId = i.match.league_id || i.match.league?.id;
 
             const matchesMarket = selectedMarkets.length === 0 || selectedMarkets.includes(marketName);
-            const matchesLeague = selectedLeagues.length === 0 || selectedLeagues.includes(leagueName);
+            const matchesLeague = typeof filterByLeague === 'undefined' || filterByLeague === null || filterByLeague === leagueId;
 
             return matchesMarket && matchesLeague;
         });
 
-        const isAnyFilterActive = selectedMarkets.length > 0 || selectedLeagues.length > 0;
+        // --- Pagination Logic ---
+        const totalItems = filteredInsights.length;
+        const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+
+        // Safety check just in case current page goes out of bounds
+        if (currentPage > totalPages) {
+            currentPage = totalPages;
+        }
+
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const paginatedInsights = filteredInsights.slice(startIndex, endIndex);
+
+        const isAnyFilterActive = selectedMarkets.length > 0 || (typeof filterByLeague !== 'undefined' && filterByLeague !== null);
 
         globalInsightVariable = insights;
         const summaryHtml = `
@@ -976,8 +1081,6 @@ function handleUpComingMatchesUi(result) {
                     </div>
                 </div>
 
-
-                
                 ${isAnyFilterActive ? `
                     <button id="btn-show-all" class="absolute top-4 right-4 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold text-[10px] px-3 py-1 rounded-full shadow-sm transition-all uppercase tracking-wider">
                         Show All
@@ -986,13 +1089,13 @@ function handleUpComingMatchesUi(result) {
             </div>
         `;
 
-        // Render card layout elements
+        // Render card layout elements (Now using paginatedInsights)
         container.innerHTML = `
             <div class="space-y-4">
                 ${summaryHtml}
-                ${filteredInsights.length === 0 ? `
+                ${paginatedInsights.length === 0 ? `
                     <div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 italic">No matches match the selected criteria.</div>
-                ` : filteredInsights.map(i => {
+                ` : paginatedInsights.map(i => {
             const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
             const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
             const fullPrediction = `${i.direction} ${i.suggestedValue}`;
@@ -1015,6 +1118,7 @@ function handleUpComingMatchesUi(result) {
                                      data-is-home="${i.isHome}"
                                      data-home-streak='${JSON.stringify(i.market.home.streak || [])}'
                                      data-away-streak='${JSON.stringify(i.market.away.streak || [])}'
+                                     data-season-id="${i.match.season_id}"
                                     class="streak-container flex flex-col items-center flex-grow cursor-pointer mt-2">
                                         <div class="text-xs font-black text-red-600">${i.streakCount} IN A ROW</div>
                                         <div class="text-[9px] text-gray-400 mt-1 uppercase">${new Date(i.match.kickoff_at).toLocaleDateString()}</div>
@@ -1041,6 +1145,21 @@ function handleUpComingMatchesUi(result) {
                     `;
         }).join('')}
             </div>
+
+            <!-- Pagination Controls -->
+            ${totalPages > 1 ? `
+                <div class="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 mt-6 shadow-sm">
+                    <button id="btn-prev-page" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-[11px] uppercase tracking-wider rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" ${currentPage === 1 ? 'disabled' : ''}>
+                        Previous
+                    </button>
+                    <span class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                        Page ${currentPage} of ${totalPages}
+                    </span>
+                    <button id="btn-next-page" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-[11px] uppercase tracking-wider rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" ${currentPage === totalPages ? 'disabled' : ''}>
+                        Next
+                    </button>
+                </div>
+            ` : ''}
         `;
 
         // Bind Market clicks
@@ -1052,20 +1171,7 @@ function handleUpComingMatchesUi(result) {
                 } else {
                     selectedMarkets.push(marketName);
                 }
-                render();
-            });
-        });
-
-        // Bind League clicks (Safely processes empty nodelist if row is hidden)
-        container.querySelectorAll('.league-badge').forEach(badge => {
-            badge.addEventListener('click', () => {
-                console.log(selectedLeagues)
-                const leagueName = badge.dataset.leagueName;
-                if (selectedLeagues.includes(leagueName)) {
-                    selectedLeagues = selectedLeagues.filter(l => l !== leagueName);
-                } else {
-                    selectedLeagues.push(leagueName);
-                }
+                currentPage = 1; // Reset to first page when filtering
                 render();
             });
         });
@@ -1074,10 +1180,46 @@ function handleUpComingMatchesUi(result) {
         const showAllBtn = container.querySelector('#btn-show-all');
         if (showAllBtn) {
             showAllBtn.addEventListener('click', () => {
+                // 1. Reset local market state
                 selectedMarkets = [];
-                selectedLeagues = [];
-                updateSidebarUiStates();
+                // 2. Reset global league state
+                if (typeof filterByLeague !== 'undefined') {
+                    filterByLeague = null;
+                    lastLeagueFilter = null;
+                }
+                // 3. Reset pagination
+                currentPage = 1;
+
+                // 4. Uncheck all UI checkboxes in the sidebar
+                document.querySelectorAll('.league-filter-chk').forEach(chk => {
+                    chk.checked = false;
+                });
+
+                // 5. Re-render UI
                 render();
+            });
+        }
+
+        // Bind Pagination Clicks
+        const prevPageBtn = container.querySelector('#btn-prev-page');
+        if (prevPageBtn) {
+            prevPageBtn.addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    render();
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' }); // Scroll back to top of container
+                }
+            });
+        }
+
+        const nextPageBtn = container.querySelector('#btn-next-page');
+        if (nextPageBtn) {
+            nextPageBtn.addEventListener('click', () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    render();
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' }); // Scroll back to top of container
+                }
             });
         }
 
@@ -1086,128 +1228,37 @@ function handleUpComingMatchesUi(result) {
             el.addEventListener('click', async () => {
                 let awayId = el.dataset.awayId;
                 let homeId = el.dataset.homeId;
+                let currentSeasonId = el.dataset.seasonId;
                 const market = el.dataset.market;
                 const homeStreak = JSON.parse(el.dataset.homeStreak);
                 const awayStreak = JSON.parse(el.dataset.awayStreak);
 
-                const awayTeamData = await fetch(`${API_URL}/dashboard?teamId=${awayId}&seasonId=${selectedSeasonId}`);
+                const awayTeamData = await fetch(`${API_URL}/dashboard?teamId=${awayId}&seasonId=${currentSeasonId}`);
                 const awayTeamResults = await awayTeamData.json();
 
-                const homeTeamData = await fetch(`${API_URL}/dashboard?teamId=${homeId}&seasonId=${selectedSeasonId}`);
+                const homeTeamData = await fetch(`${API_URL}/dashboard?teamId=${homeId}&seasonId=${currentSeasonId}`);
                 const homeTeamResults = await homeTeamData.json();
 
-                handleStreakPopUp(homeTeamResults?.data, awayTeamResults?.data, market, homeStreak, awayStreak);
+                if (typeof handleStreakPopUp === 'function') {
+                    handleStreakPopUp(homeTeamResults?.data, awayTeamResults?.data);
+                }
             });
         });
     };
+
+    // Attach the render to the window object so the checkbox listener can trigger it
     window.refreshInsightsDashboard = render;
+
+    // Initial render
     render();
 }
 
 
-function updateSidebarStyles() {
-    document.querySelectorAll('[data-league-name]').forEach(btn => {
-        const name = btn.dataset.leagueName;
-        const id = btn.id.replace('league-btn-', '');
-        const badge = document.getElementById(`sidebar-count-${id}`);
-        const isSelected = selectedLeagues.includes(name);
+const getOddForPrediction = (market, direction, val) => {
+    const searchStr = `${direction.toLowerCase()}-${val}`;
+    const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
+    return found ? found.odd : null;
+};
 
-        btn.classList.remove('bg-purple-50', 'text-purple-700', 'border-purple-300', 'bg-white', 'text-gray-700', 'border-transparent');
-        if (badge) {
-            badge.classList.remove('bg-purple-600', 'text-white', 'bg-gray-100', 'text-gray-500');
-        }
 
-        if (isSelected) {
-            btn.classList.add('bg-purple-50', 'text-purple-700', 'border-purple-300');
-            if (badge) badge.classList.add('bg-purple-600', 'text-white');
-        } else {
-            btn.classList.add('bg-white', 'text-gray-700', 'border-transparent');
-            if (badge) badge.classList.add('bg-gray-100', 'text-gray-500');
-        }
-    });
-}
-// Global function to sync checkboxes, counts, and active purple styling states
-function updateSidebarUiStates() {
-    document.querySelectorAll('[data-league-name]').forEach(btn => {
-        const name = btn.dataset.leagueName;
-        const id = btn.id.replace('league-btn-', '');
-        const badge = document.getElementById(`sidebar-count-${id}`);
-        const checkbox = document.getElementById(`league-chk-${id}`);
 
-        const isSelected = selectedLeagues.includes(name);
-
-        // 1. Sync Checkbox State
-        if (checkbox) {
-            checkbox.checked = isSelected;
-        }
-
-        // 2. Sync Count Numbers
-        if (badge && window.leagueMarketCounts) {
-            badge.textContent = window.leagueMarketCounts[name] || 0;
-        }
-
-        // 3. Sync Component Theme Styles
-        if (isSelected) {
-            btn.classList.add('bg-purple-50', 'text-purple-700', 'border-purple-300');
-            btn.classList.remove('bg-white', 'text-gray-700', 'border-transparent');
-            if (badge) {
-                badge.classList.add('bg-purple-600', 'text-white');
-                badge.classList.remove('bg-gray-100', 'text-gray-500');
-            }
-        } else {
-            btn.classList.add('bg-white', 'text-gray-700', 'border-transparent');
-            btn.classList.remove('bg-purple-50', 'text-purple-700', 'border-purple-300');
-            if (badge) {
-                badge.classList.add('bg-gray-100', 'text-gray-500');
-                badge.classList.remove('bg-purple-600', 'text-white');
-            }
-        }
-    });
-}
-
-// Checkbox click filter controller
-function toggleLeagueSelection(event, leagueName, leagueId) {
-    event.stopPropagation(); // Prevents the dropdown wrapper accordion from opening/closing
-
-    const isChecked = event.target.checked;
-
-    if (isChecked) {
-        if (!selectedLeagues.includes(leagueName)) {
-            selectedLeagues.push(leagueName);
-        }
-    } else {
-        selectedLeagues = selectedLeagues.filter(l => l !== leagueName);
-    }
-
-    updateSidebarUiStates();
-    refreshInsightsDashboard();
-}
-
-// setInterval(() => {
-//     console.log(globalInsightVariable)
-// }, 5000);
-
-//         <!-- League Row (Only displays if multiple leagues exist) -->
-//         ${allLeagues.length > 1 ? `
-//             <div class="flex flex-wrap gap-2 items-center border-t border-gray-200/60 pt-2.5">
-//                 <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">Leagues:</span>
-//                 <div class="flex flex-wrap gap-2 flex-grow">
-//                     ${Object.entries(leagueCounts).map(([name, count]) => {
-//     const isSelected = selectedLeagues.includes(name);
-//     const badgeClass = isSelected
-//         ? 'bg-purple-600 border-purple-600 text-white shadow-sm'
-//         : count === 0
-//             ? 'bg-white border-gray-100 text-gray-300 opacity-40 pointer-events-none'
-//             : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100';
-//     const countClass = isSelected ? 'bg-white text-purple-600' : 'bg-purple-600 text-white';
-
-//     return `
-//                             <div data-league-name="${name}" class="league-badge border rounded-full px-3 py-1 flex items-center gap-2 text-[10px] font-black cursor-pointer select-none transition-all ${badgeClass}">
-//                                 <span>${name}</span>
-//                                 <span class="${countClass} px-1.5 py-0.5 rounded-full text-[9px]">${count}</span>
-//                             </div>
-//                         `;
-// }).join('')}
-//                 </div>
-//             </div>
-//         ` : ''}

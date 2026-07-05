@@ -400,6 +400,7 @@ const teamsServices = {
                 id: match.id,
                 kickoff_at: match.kickoff_at,
                 league_id: match.season.league.id,
+                season_id: match.season.id,
                 league_name: match.season.league.name,
                 homeTeam: match.homeTeam,
                 awayTeam: match.awayTeam,
