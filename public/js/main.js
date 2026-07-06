@@ -203,6 +203,12 @@ document.getElementById('openAllMArketsBtn').addEventListener('click', async () 
         if (countSpan) {
             const count = leagueMarketCounts[league.id] || 0;
             countSpan.textContent = count;
+
+            if (count === 0) {
+                countSpan.classList.add('hidden');
+            } else {
+                countSpan.classList.remove('hidden');
+            }
         }
     });
 })
