@@ -269,12 +269,16 @@ function getColorForValue(value, avgValue) {
         return 'text-gray-300';
     }
     const numVal = Number(value);
+    const avgNum = Number(avgValue);
 
     if (numVal === 0) {
         return 'text-red-400 font-medium';
     }
-    if (numVal > avgValue) {
+    if (numVal > avgNum) {
         return 'text-blue-600 font-bold bg-blue-50/50 rounded';
+    }
+    if (numVal < avgNum) {
+        return 'text-red-500 font-medium bg-red-50/30 rounded';
     }
     return 'text-gray-600';
 }
@@ -585,6 +589,7 @@ async function selectTeam(teamId, teamName) {
                         month: 'short', day: 'numeric'
                     });
                     const oppName = md.opponent?.name || 'Unknown';
+                    const rawColorClass = getColorForValue(md.rawValue, avg.avg_value);
                     return `
                                                     <tr class="hover:bg-white/70 transition-colors">
                                                         <td class="py-1 px-1 text-gray-400 text-[10px]">${matchDate}</td>
@@ -593,7 +598,7 @@ async function selectTeam(teamId, teamName) {
                                                             ${oppName}
                                                         </td>
                                                         <td class="py-1 px-1 text-center text-gray-500">${md.score}</td>
-                                                        <td class="py-1 px-1 text-right text-gray-900 font-bold bg-blue-50/30">${md.rawValue}</td>
+                                                        <td class="py-1 px-1 text-right text-gray-900 font-bold bg-blue-50/30">${rawColorClass}</td>
                                                     </tr>
                                                 `;
                 }).join('')}

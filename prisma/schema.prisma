@@ -33,6 +33,9 @@ model League {
   is_active  Boolean
   created_at DateTime @default(now())
 
+  is_visible    Boolean @default(true)
+  display_order Int     @default(999)
+
   // Relations
   sport   Sport    @relation(fields: [sport_id], references: [id])
   seasons Season[]

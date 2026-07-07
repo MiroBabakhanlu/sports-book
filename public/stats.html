@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>records</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes slideInFromRight {
+            0% {
+                transform: translateX(100%);
+            }
+
+            100% {
+                transform: translateX(0);
+            }
+        }
+
+        .animate-slide-in {
+            animation: slideInFromRight 0.25s ease-out forwards;
+        }
+
+        /* Custom scrollbar for table view */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        .matchday-cell {
+            min-width: 60px;
+            max-width: 60px;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 text-gray-900 min-h-screen font-sans antialiased">
+
+    <nav class="bg-white border-b border-gray-200 sticky top-0 z-50 px-4 py-4">
+        <div class="w-full flex justify-between items-center">
+            <span class="text-lg font-bold tracking-tight text-gray-900">demo</span>
+            <div id="navigationBreadcrumb" class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                Select a Specific League
+            </div>
+        </div>
+    </nav>
+
+    <main class="w-full pl-0 pr-6 py-6">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+            <!-- Sidebar: Reduced to 2/12 columns (~16.6% width) -->
+            <div
+                class="lg:col-span-2 bg-white rounded-r-xl border-y border-r border-gray-200 p-4 flex flex-col max-h-[85vh] overflow-y-auto sticky top-24 custom-scrollbar">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-2">
+                    Leagues & Seasons
+                </h2>
+                <h2 id="openAllMArketsBtn"
+                    class="text-xs font-bold uppercase tracking-wider text-blue-400 mb-3 flex items-center gap-2">
+                    Full market
+                </h2>
+                <div id="leaguesContainer" class="space-y-1">
+                    <div class="text-xs text-gray-400 py-4 text-center animate-pulse">Loading active leagues...</div>
+                </div>
+            </div>
+
+            <!-- Main Content: Expanded to 10/12 columns (~83.3% width) -->
+            <div class="lg:col-span-10 space-y-6">
+
+                <div id="dashboardPlaceholder"
+                    class="bg-white rounded-xl border border-dashed border-gray-200 p-8 text-center min-h-[400px] flex flex-col items-center justify-center text-gray-400 italic bg-gray-50/40">
+                    <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <p class="text-sm font-medium text-gray-600 not-italic">No Team Selected</p>
+                    <p class="text-xs text-gray-400 max-w-sm mt-1 mx-auto">Select an active league, choose a season, and
+                        pick an available team from the left configuration tree panel to compute analytics metrics.</p>
+                </div>
+
+                <div id="dashboardDataGrid" class="hidden flex flex-col gap-6">
+
+                    <!-- markets for selected -->
+                    <div id="navContainer" class="bg-white rounded-xl border border-gray-200 p-5 w-full">
+                        <div class="mb-6 border-b border-gray-200">
+                            <nav id="nav" class="flex space-x-1" aria-label="Tabs">
+                                <button style="display: none;" id="openCurrTeamAvgsBtn"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
+                                    Current team avgs
+                                </button>
+
+                                <button id="openInDepthView"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
+                                    In-Depth Analysis
+                                </button>
+
+                                <button id="openFullTimeGameViewBtn"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
+                                    Game History
+                                </button>
+
+                                <div id="openUpcomingMatchesContainerBtn"
+                                    class="px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-gray-500 border-b-2 border-transparent flex items-center gap-1.5 cursor-pointer">
+                                    Upcoming Markets
+                                    <div id="upComingGamesSwitchContainer" style="display: none;">
+
+                                        <span style="display: none;" id="league-games"
+                                            class="text-gray-500 underline decoration-dotted cursor-pointer hover:text-blue-600 transition-colors">League</span>
+                                        <!-- / -->
+                                        <span style="display: none;" id="team-games"
+                                            class="text-blue-600 underline decoration-dotted cursor-pointer font-bold">Team
+                                        </span>
+                                    </div>
+                                </div>
+                            </nav>
+                        </div>
+
+                    </div>
+
+                    <!-- matchday -->
+                    <div id="matchday-container" style="display: none;"
+                        class="bg-white rounded-xl border border-gray-200 p-5 w-full">
+                        <h3 class="text-xs font-bold uppercase text-gray-400 tracking-wider mb-4">Matchday Timelines
+                        </h3>
+                        <div class="overflow-x-auto custom-scrollbar">
+                            <table class="w-full text-left border-collapse min-w-[800px]">
+                                <thead>
+                                    <tr
+                                        class="text-xs uppercase tracking-wider text-gray-400 border-b border-gray-200 bg-gray-50/70">
+                                        <th class="py-3 px-4 font-semibold">Kickoff Date</th>
+                                        <th class="py-3 px-4 font-semibold text-right w-[25%]">Home Team</th>
+                                        <th class="py-3 px-4 font-semibold text-center w-[12%]">Score</th>
+                                        <th class="py-3 px-4 font-semibold text-left w-[25%]">Away Team</th>
+                                        <th class="py-3 px-4 font-semibold text-center">Match Stats</th>
+                                        <th class="py-3 px-4 font-semibold text-center">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fixturesTableBody" class="divide-y divide-gray-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id='team-avgs-container' style="display: none;"
+                        class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+                    </div>
+
+                    <div id="upcoming-matches-container">
+
+                    </div>
+
+                    <div id="in-depth-container">
+
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <div id="twoTeamtableViewContent">
+
+    </div>
+
+    <script src="./js/main.js"></script>
+
+</body>
+
+</html>

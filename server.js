@@ -4,23 +4,11 @@ const path = require('path');
 const { connectDB } = require('./src/utils/prisma');
 const errorMiddleware = require('./src/middlewares/errorMiddleware');
 const teamsRoutes = require('./src/routes/team.routes');
+const adminRoutes = require('./src/routes/admin.routes');
 const { runPipelines } = require('./pop-db');
 const { runOddsPipeline } = require('./odds-pipeline');
 const { startStreakWorker } = require('./streak-tracker');
 
-
-
-const app = express();
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-dotenv.config();
-app.use(express.static(path.join(__dirname, 'public')));
-
-
-app.use('/api/teams', teamsRoutes);
-
-
-const port = process.env.PORT || 8080;
 const targetLeagues = [
     // [140, 2025],
     // [39, 2026],
@@ -69,14 +57,31 @@ const activeLeagues = [
     [72, 2026],
 
 ];
+
+
+const app = express();
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+dotenv.config();
+app.use(express.static(path.join(__dirname, 'public')));
+
+
+
+
+app.use('/api/teams', teamsRoutes);
+app.use('/api/admin', adminRoutes)
+
+
+
+
+
+const port = process.env.PORT || 8080;
 app.use(errorMiddleware);
-
-
 app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        runPipelines(targetLeagues)
+        // runPipelines(targetLeagues)
         // runOddsPipeline(activeLeagues);
         // startStreakWorker(targetLeagues);
         // require('./update-db');
