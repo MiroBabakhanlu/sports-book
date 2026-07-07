@@ -144,3 +144,6 @@ const openConfigContainer = (containerId) => {
         bookmakerBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
     }
 }
+
+// npx prisma db push --force-reset
+// npx prisma generate npx prisma db push
