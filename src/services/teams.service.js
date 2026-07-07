@@ -232,7 +232,15 @@ const teamsServices = {
     getUpcomingMatches: async ({ leagueId, teamId, seasonYear }) => {
         const now = new Date();
 
-        console.log(`\n🔍 Searching Upcoming Matches - League: ${leagueId || 'N/A'}, Team: ${teamId || 'N/A'}, Season: ${seasonYear}`);
+        // console.log(`\n🔍 Searching Upcoming Matches - League: ${leagueId || 'N/A'}, Team: ${teamId || 'N/A'}, Season: ${seasonYear}`);
+
+        const targetBookmaker = await prisma.bookmaker.findUnique({
+            where: { name: 'Bet365' }
+        });
+        const targetBookmakerId = targetBookmaker.id;
+        if (!targetBookmakerId) {
+            throw new AppError('could not find that given bookmaker name', 400);
+        }
 
         // 1. Build dynamic match filter based on input parameters
         const matchWhereClause = {
@@ -268,7 +276,7 @@ const teamsServices = {
                 },
                 matchOdds: {
                     where: {
-                        bookmaker_name: 'Bet365',
+                        bookmaker_id: targetBookmakerId,
                         market: { slug: { in: [...Object.keys(SLUG_MAP), 'match-winner'] } }
                     },
                     select: {

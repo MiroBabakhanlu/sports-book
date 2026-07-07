@@ -39,6 +39,10 @@
                     sources</li>
                 <li class="px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors">
                     Notifications</li>
+                <a href="./stats.html"
+                    class="px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors"
+                    id="switch-stats-page">
+                    STATS</a>
             </ul>
         </div>
     </aside>
@@ -50,13 +54,13 @@
             <div class="flex justify-between items-start">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-900 mb-1">League configuration</h1>
-                    <p class="text-sm text-gray-500">Manage which leagues appear on the site, their display order, and
-                        season status</p>
+                    <!-- <p class="text-sm text-gray-500">Manage which leagues appear on the site, their display order, and
+                        season status</p> -->
                 </div>
-                <button
+                <!-- <button
                     class="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors">
                     Add league
-                </button>
+                </button> -->
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="league-summery-container">
@@ -75,19 +79,24 @@
             </div>
 
             <div class="flex flex-wrap items-center gap-4">
-                <input type="text" placeholder="Search leagues..."
+                <input type="text" id="league-search-input" placeholder="Search leagues..."
                     class="px-4 py-2 border border-gray-200 rounded-lg text-sm w-64 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent">
 
-                <div class="flex rounded-lg border border-gray-200 overflow-hidden shadow-sm">
-                    <button
+                <div class="flex rounded-lg border border-gray-200 overflow-hidden shadow-sm" id="filter-container">
+                    <button id="filter-all"
                         class="px-4 py-2 bg-teal-50 text-teal-700 text-sm font-medium border-r border-gray-200">All</button>
-                    <button
+                    <button id="filter-active"
                         class="px-4 py-2 bg-white text-gray-600 text-sm hover:bg-gray-50 border-r border-gray-200 transition-colors">Active</button>
-                    <button
+                    <button id="filter-inactive"
                         class="px-4 py-2 bg-white text-gray-600 text-sm hover:bg-gray-50 border-r border-gray-200 transition-colors">Inactive</button>
+                    <button id="filter-included"
+                        class="px-4 py-2 bg-white text-gray-600 text-sm hover:bg-gray-50 border-r border-gray-200 transition-colors">Included</button>
+                    <button id="filter-excluded"
+                        class="px-4 py-2 bg-white text-gray-600 text-sm hover:bg-gray-50 border-r border-gray-200 transition-colors">Not
+                        Included</button>
                 </div>
 
-                <span class="ml-auto text-xs text-gray-400 italic">Drag rows to reorder</span>
+                <!-- <span class="ml-auto text-xs text-gray-400 italic">Drag rows to reorder</span> -->
             </div>
 
             <div>
@@ -106,6 +115,7 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="./js/admin.js"></script>
 </body>
 

@@ -132,7 +132,7 @@ model MatchOdds {
   id             Int      @id @default(autoincrement())
   match_id       Int
   market_id      Int
-  bookmaker_name String // e.g., "Bet365", "10Bet" - No extra table needed!
+  bookmaker_id   Int
   slug           String // e.g., "over-2-5", "under-2-5", "home", "away"
   odd            Decimal // The actual decimal value (e.g., 1.95)
   fetched_at     DateTime @default(now())
@@ -141,10 +141,41 @@ model MatchOdds {
   // Relations
   match  Match  @relation(fields: [match_id], references: [id])
   market Market @relation(fields: [market_id], references: [id])
+  bookmaker      Bookmaker @relation(fields: [bookmaker_id], references: [id])
 
   // Simple unique constraint to prevent duplicate lines for the same match
-  @@unique([match_id, market_id, bookmaker_name, slug], name: "match_market_bookmaker_slug")
+  @@unique([match_id, market_id, bookmaker_id, slug], name: "match_market_bookmaker_slug")
   @@map("MATCH_ODDS")
+}
+
+model Bookmaker {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  logo_url  String?
+  is_active Boolean  @default(true) // Global active status
+  created_at DateTime @default(now())
+  is_default     Boolean   @default(false) // If true, acts as global fallback
+  affiliate_link String?
+
+
+  // Relations
+  regions   BookmakerRegion[]
+  matchOdds  MatchOdds[]
+  @@map("BOOKMAKER")
+}
+
+model BookmakerRegion {
+  id             Int       @id @default(autoincrement())
+  bookmaker_id   Int
+  region_code    String?    // e.g., "US", "GB", "DE" (use ISO codes)
+  is_active      Boolean   @default(true) // Regional active status
+
+  // Relation
+  bookmaker      Bookmaker @relation(fields: [bookmaker_id], references: [id])
+
+  // Constraints
+  @@unique([bookmaker_id, region_code]) // Cannot have duplicate region configs for one bookmaker
+  @@map("BOOKMAKER_REGION")
 }
 
 model MatchTeamStat {

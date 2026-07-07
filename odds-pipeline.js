@@ -54,6 +54,15 @@ async function syncTargetedOdds(targetLeagues) {
             return;
         }
 
+        // 1. Load Caches for Markets and Bookmakers
+        const dbMarkets = await prisma.market.findMany();
+        const marketLookupBySlug = {};
+        dbMarkets.forEach(m => { marketLookupBySlug[m.slug] = m.id; });
+
+        const dbBookmakers = await prisma.bookmaker.findMany();
+        const bookmakerLookupByName = {};
+        dbBookmakers.forEach(b => { bookmakerLookupByName[b.name] = b.id; });
+
         const activeTasks = new Map();
         upcomingMatches.forEach((match) => {
             const leagueApiId = match.season.league.id_api;
@@ -63,10 +72,6 @@ async function syncTargetedOdds(targetLeagues) {
                 activeTasks.set(key, { leagueApiId, seasonYear });
             }
         });
-
-        const dbMarkets = await prisma.market.findMany();
-        const marketLookupBySlug = {};
-        dbMarkets.forEach(m => { marketLookupBySlug[m.slug] = m.id; });
 
         let totalUpserts = 0;
 
@@ -92,14 +97,25 @@ async function syncTargetedOdds(targetLeagues) {
                     if (!localMatch) continue;
 
                     for (const bookmaker of fixtureItem.bookmakers) {
-                        for (const bet of bookmaker.bets) {
 
-                            // USE MARKET FORMATTER (No dots)
+                        // A. Handle Bookmaker Auto-Discovery
+                        let internalBookmakerId = bookmakerLookupByName[bookmaker.name];
+
+                        if (!internalBookmakerId) {
+                            console.log(`✨ [Auto-Discovery] Creating new bookmaker: "${bookmaker.name}"`);
+                            const newBookmaker = await prisma.bookmaker.create({
+                                data: { name: bookmaker.name } // is_active/is_default get default values
+                            });
+                            internalBookmakerId = newBookmaker.id;
+                            bookmakerLookupByName[bookmaker.name] = internalBookmakerId;
+                        }
+
+                        // B. Process Bets
+                        for (const bet of bookmaker.bets) {
                             const marketSlug = formatMarketSlug(bet.name);
                             let internalMarketId = marketLookupBySlug[marketSlug];
 
                             if (!internalMarketId) {
-                                console.log(`✨ [Auto-Discovery] Creating new market: "${bet.name}" (Slug: ${marketSlug})`);
                                 const newMarket = await prisma.market.upsert({
                                     where: { slug: marketSlug },
                                     update: { name: bet.name },
@@ -115,7 +131,6 @@ async function syncTargetedOdds(targetLeagues) {
                                 marketLookupBySlug[marketSlug] = internalMarketId;
                             }
 
-                            // USE SELECTION FORMATTER (Allows dots)
                             for (const selection of bet.values) {
                                 const standardizedSlug = formatSelectionSlug(selection.value);
 
@@ -124,7 +139,7 @@ async function syncTargetedOdds(targetLeagues) {
                                         match_market_bookmaker_slug: {
                                             match_id: localMatch.id,
                                             market_id: internalMarketId,
-                                            bookmaker_name: bookmaker.name,
+                                            bookmaker_id: internalBookmakerId, // USE ID, NOT NAME
                                             slug: standardizedSlug
                                         }
                                     },
@@ -135,7 +150,7 @@ async function syncTargetedOdds(targetLeagues) {
                                     create: {
                                         match_id: localMatch.id,
                                         market_id: internalMarketId,
-                                        bookmaker_name: bookmaker.name,
+                                        bookmaker_id: internalBookmakerId, // USE ID, NOT NAME
                                         slug: standardizedSlug,
                                         odd: selection.odd
                                     }

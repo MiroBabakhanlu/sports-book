@@ -1,7 +1,15 @@
+
 const API_URL = '/api/admin';
+const API_BOOKMAKER_URL = '/api/bookmaker';
 
 //states
 let leaguesCache = [];
+let currentFilter = 'all';
+let leagueSortableInstance = null;
+let searchQuery = '';
+
+
+
 
 //events
 document.addEventListener('DOMContentLoaded', async () => {
@@ -16,6 +24,39 @@ document.getElementById('bookmakerViewBtn').addEventListener('click', () => {
     openConfigContainer('bookmaker-config-container');
 });
 
+const setupFilterListeners = () => {
+    const filterButtons = document.querySelectorAll('#filter-container button');
+    filterButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            // UI Toggle
+            filterButtons.forEach(b => b.classList.remove('bg-teal-50', 'text-teal-700', 'font-medium'));
+            btn.classList.add('bg-teal-50', 'text-teal-700', 'font-medium');
+
+            // Set Filter
+            const id = e.target.id;
+            if (id === 'filter-all') currentFilter = 'all';
+            else if (id === 'filter-active') currentFilter = 'active';
+            else if (id === 'filter-inactive') currentFilter = 'inactive';
+            else if (id === 'filter-included') currentFilter = 'included';
+            else if (id === 'filter-excluded') currentFilter = 'excluded';
+
+            renderLeaguesListUI(); // Re-render with filter
+        });
+    });
+}
+
+const setupSearchListener = () => {
+    document.getElementById('league-search-input').addEventListener('input', (e) => {
+        searchQuery = e.target.value.toLowerCase();
+        renderLeaguesListUI(); // Re-render when user types
+    });
+}
+
+
+
+
+
+
 //async opp
 const getAllLeagues = async () => {
     try {
@@ -26,7 +67,6 @@ const getAllLeagues = async () => {
         return [];
     }
 }
-
 const changeLeagueVisibility = async (leagueId, isChecked) => {
     // 1. Instantly update the local state variable
     const league = leaguesCache.find(l => l.id === leagueId);
@@ -52,17 +92,30 @@ const changeLeagueVisibility = async (leagueId, isChecked) => {
         renderLeaguesListUI();
     }
 }
-
 const changeLeagueOrder = async (leagueIds) => {
     try {
         const response = await axios.post(`${API_URL}/change-order`, {
             leagueIds: leagueIds
         });
+        return response.data?.data || response.data;
         console.log(response?.data);
     } catch (error) {
         console.log(error);
     }
 }
+
+
+getAllBookmakers = async () => {
+    try {
+        const response = await axios.get(`${API_BOOKMAKER_URL}/bookmakers`);
+        return response.data?.data;
+    } catch (error) {
+        console.log(error)
+    }
+}
+
+
+
 
 //rendering
 const renderFullLeagueConfig = () => {
@@ -85,23 +138,42 @@ const renderLeaguesListUI = () => {
     const leagueContainer = document.getElementById('league-byorder-container');
     if (!leaguesCache) return;
 
-    leagueContainer.innerHTML = leaguesCache.map((league, index) => `
-        <div class="flex items-center p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors group">
-            <div class="w-10 text-gray-300 font-bold text-sm text-center">${index + 1}</div>
+    // --- CLEANUP: Destroy existing instance before re-rendering ---
+    if (leagueSortableInstance) {
+        leagueSortableInstance.destroy();
+        leagueSortableInstance = null;
+    }
+
+    // 1. FILTERING LOGIC
+    let displayList = [...leaguesCache];
+    if (currentFilter === 'active') displayList = leaguesCache.filter(l => l.is_active);
+    else if (currentFilter === 'inactive') displayList = leaguesCache.filter(l => !l.is_active);
+    else if (currentFilter === 'included') displayList = leaguesCache.filter(l => l.is_visible);
+    else if (currentFilter === 'excluded') displayList = leaguesCache.filter(l => !l.is_visible);
+
+    if (searchQuery) {
+        displayList = displayList.filter(l => l.name.toLowerCase().includes(searchQuery));
+    }
+
+    // 2. RENDER THE FILTERED LIST
+    leagueContainer.innerHTML = displayList.map((league, index) => `
+        <div data-id="${league.id}" class="flex items-center p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors group ${currentFilter === 'all' ? 'cursor-move' : 'cursor-default'}">
+            <div class="text-gray-300 mr-2 opacity-50 ${currentFilter === 'all' ? 'group-hover:opacity-100' : 'hidden'}">⋮⋮</div>
+            
+            <div class="row-number w-8 text-gray-400 font-bold text-sm text-center">${index + 1}</div>
             
             <div class="flex-1 pl-4">
-                <h4 class="font-semibold text-sm text-gray-900 mb-1">${league.name}</h4>
+                <h4 class="font-semibold text-sm text-gray-900 mb-1">${league.name}  </h4
+                <span> active streaks : ${league.streakCount} </span> 
                 <div class="flex items-center gap-3 text-xs text-gray-500">
                     <span class="border border-teal-600 text-teal-700 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-50">
                         Season 25/26 • ${league.is_active ? 'Active' : 'Inactive'}
                     </span>
                     <span>${league.country || 'International'}</span>
-                    <span>•</span>
-                    <span>${league.streakCount || '0'} active streaks</span>
                 </div>
             </div>
             
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-4 cursor-default" onmousedown="event.stopPropagation()">
                 <label class="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" class="sr-only peer" 
                         ${league.is_visible ? 'checked' : ''} 
@@ -111,6 +183,31 @@ const renderLeaguesListUI = () => {
             </div>
         </div>
     `).join('');
+
+    // 3. SORTABLE LOGIC: Only initialize if currentFilter is 'all'
+    if (currentFilter === 'all' && !searchQuery) {
+        leagueSortableInstance = Sortable.create(leagueContainer, {
+            animation: 150,
+            ghostClass: 'opacity-50',
+            onEnd: async function () {
+                const previousLeagues = [...leaguesCache];
+                const rowElements = leagueContainer.querySelectorAll('div[data-id]');
+                const newOrderIds = Array.from(rowElements).map(el => parseInt(el.dataset.id));
+
+                rowElements.forEach((row, idx) => row.querySelector('.row-number').innerText = idx + 1);
+                leaguesCache.sort((a, b) => newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id));
+
+                try {
+                    const updatedLeagues = await changeLeagueOrder(newOrderIds);
+                    if (updatedLeagues) leaguesCache = updatedLeagues;
+                } catch (error) {
+                    alert("Failed to save new order.");
+                    leaguesCache = previousLeagues;
+                    renderLeaguesListUI();
+                }
+            }
+        });
+    }
 }
 
 const renderLeagues = async () => {
@@ -118,6 +215,54 @@ const renderLeagues = async () => {
     leaguesCache = await getAllLeagues();
     renderLeagueSummery(leaguesCache);
     renderLeaguesListUI();
+}
+
+
+const renderBookmakers = async () => {
+    const response = await getAllBookmakers();
+    console.log(response)
+    renderBookmakersUi(response);
+}
+
+const renderBookmakersUi = (response) => {
+    const bookmakerContainer = document.getElementById('bookmaker-config-container');
+
+    // Added a container grid class here
+    bookmakerContainer.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6";
+
+    bookmakerContainer.innerHTML = response.map((bookmaker) => `
+        <div class="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col gap-4">
+            
+            <div class="flex items-center gap-3">
+                <img src="${bookmaker?.logo_url}" alt="${bookmaker?.name}" class="w-10 h-10 object-contain rounded border border-gray-100"/>
+                <span class="text-lg font-bold text-gray-800">${bookmaker?.name}</span>
+            </div>
+
+            <div class="flex flex-col space-y-1">
+                <label class="text-sm font-medium text-gray-500">Affiliate Link</label>
+                <input type="text" value="${bookmaker?.affiliate_link || ''}" 
+                    class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" />
+            </div>
+
+            <div class="bg-gray-50 p-4 rounded-lg mt-2">
+                <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Active Regions</label>
+                <div class="flex flex-wrap gap-2 mt-2">
+                    ${bookmaker?.regions.map((val) => `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                            ${val?.region_code || 'No region'}
+                        </span>
+                    `).join('')}
+                </div>
+                
+                <button class="w-full mt-4 flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium py-2 rounded-lg transition shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add region
+                </button>
+            </div>
+        </div>
+    `).join('');
 }
 
 //helper
@@ -134,16 +279,16 @@ const openConfigContainer = (containerId) => {
     bookmakerBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
 
     if (containerId === 'league-config-container') {
+        setupFilterListeners()
         leagueConfig.classList.remove('hidden');
         leagueBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
         renderLeagues();
+        setupSearchListener()
     }
 
     if (containerId === 'bookmaker-config-container') {
         bookmakerConfig.classList.remove('hidden');
         bookmakerBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
+        renderBookmakers();
     }
 }
-
-// npx prisma db push --force-reset
-// npx prisma generate npx prisma db push
