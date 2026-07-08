@@ -15,10 +15,52 @@ const adminService = {
         let ids = allLeagues.map(league => league.id);
 
         for (let i = 0; i < ids.length; i++) {
-            const test = await getUpcomingMatches({ leagueId: ids[i], seasonYear: 2026 })
-            let updatedLeagueData = allLeagues.find(l => l.id == ids[i]);
-            updatedLeagueData.streakCount = handleLeaueStreakCount(test)[`${ids[i]}`];
-            updatedLeagueData.streakCount == undefined ? updatedLeagueData.streakCount = 0 : ''
+            const leagueId = ids[i];
+            let updatedLeagueData = allLeagues.find(l => l.id == leagueId);
+
+            // --- Your Existing Streak Logic ---
+            const test = await getUpcomingMatches({ leagueId, seasonYear: 2026 });
+            updatedLeagueData.streakCount = handleLeaueStreakCount(test)[`${leagueId}`] ?? 0;
+
+            // --- FIXED: Current Matchday via Highest Finished Matchday Number ---
+            const season = await prisma.season.findFirst({
+                where: {
+                    league_id: leagueId,
+                    year: "2026"
+                }
+            });
+
+            if (season) {
+                const highestFinishedMatchday = await prisma.match.findFirst({
+                    where: {
+                        season_id: season.id,
+                        status: { in: ["FT", "AET", "PEN"] }, // Only finished games
+                        matchday: { not: null }
+                    },
+                    orderBy: {
+                        matchday: 'desc' // <-- YOUR LOGIC: Gets the absolute highest round number first
+                    },
+                    select: {
+                        matchday: true
+                    }
+                });
+
+                if (highestFinishedMatchday?.matchday) {
+                    // If Matchday 18 has finished games, this guarantees we display 18
+                    updatedLeagueData.currentMatchday = highestFinishedMatchday.matchday;
+                } else {
+                    // Fallback: If ZERO games have finished yet, default to the first scheduled round
+                    const firstScheduledMatch = await prisma.match.findFirst({
+                        where: { season_id: season.id, matchday: { not: null } },
+                        orderBy: { kickoff_at: 'asc' },
+                        select: { matchday: true }
+                    });
+
+                    updatedLeagueData.currentMatchday = firstScheduledMatch?.matchday ?? 1;
+                }
+            } else {
+                updatedLeagueData.currentMatchday = 0;
+            }
         }
 
         return allLeagues;

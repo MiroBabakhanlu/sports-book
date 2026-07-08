@@ -11,6 +11,13 @@ function chunkArray(array, size) {
     }
     return chunks;
 }
+function extractMatchday(round) {
+    if (!round) return null;
+
+    const match = round.match(/\d+/);
+
+    return match ? Number(match[0]) : null;
+}
 
 // 1. Helper function now accepts the transaction client (tx)
 async function upsertMatchStat(tx, matchId, teamId, marketId, value, side) {
@@ -265,7 +272,7 @@ async function processLeague(leagueId, seasonYear) {
                         season_id: dbSeason.id,
                         home_team_id: homeTeam.id,
                         away_team_id: awayTeam.id,
-                        matchday: f.league.round ? parseInt(f.league.round.split('-').pop()) : null,
+                        matchday: extractMatchday(f.league.round),
                         kickoff_at: new Date(f.fixture.date),
                         status: f.fixture.status.short,
                         home_score: f.goals.home,

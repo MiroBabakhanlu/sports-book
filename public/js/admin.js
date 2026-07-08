@@ -266,32 +266,42 @@ const renderLeaguesListUI = () => {
 
     // 2. RENDER THE FILTERED LIST
     leagueContainer.innerHTML = displayList.map((league, index) => `
-        <div data-id="${league.id}" class="flex items-center p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors group ${currentFilter === 'all' ? 'cursor-move' : 'cursor-default'}">
-            <div class="text-gray-300 mr-2 opacity-50 ${currentFilter === 'all' ? 'group-hover:opacity-100' : 'hidden'}">⋮⋮</div>
+    <div data-id="${league.id}" class="flex items-center p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors group ${currentFilter === 'all' ? 'cursor-move' : 'cursor-default'}">
+        <div class="text-gray-300 mr-2 opacity-50 ${currentFilter === 'all' ? 'group-hover:opacity-100' : 'hidden'}">⋮⋮</div>
+        
+        <div class="row-number w-8 text-gray-400 font-bold text-sm text-center">${index + 1}</div>
+        
+        <div class="flex-1 pl-4 flex flex-col gap-1">
+            <!-- 1. Country & League Title Line -->
+            <h4 class="text-sm text-gray-900 font-medium">
+                ${league.country ? `<span class="text-gray-800 font-semibold">${league.country}:</span>` : ''} 
+                <span class="font-bold text-gray-950">${league.name}</span>
+            </h4>
             
-            <div class="row-number w-8 text-gray-400 font-bold text-sm text-center">${index + 1}</div>
-            
-            <div class="flex-1 pl-4">
-                <h4 class="font-semibold text-sm text-gray-900 mb-1">${league.name}  </h4
-                <span> active streaks : ${league.streakCount} </span> 
-                <div class="flex items-center gap-3 text-xs text-gray-500">
-                    <span class="border border-teal-600 text-teal-700 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-50">
-                        Season 25/26 • ${league.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                    <span>${league.country || 'International'}</span>
-                </div>
+            <!-- 2. Round/Matchday Pill Badge (Matches image_2e45be.png) -->
+            <div class="flex items-center">
+                <span class="inline-flex items-center border border-teal-500/40 text-teal-700 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-teal-50/50">
+                    Round: ${league.currentMatchday ?? 0}
+                </span>
             </div>
             
-            <div class="flex items-center gap-4 cursor-default" onmousedown="event.stopPropagation()">
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" class="sr-only peer" 
-                        ${league.is_visible ? 'checked' : ''} 
-                        onchange="changeLeagueVisibility(${league.id}, this.checked)">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
-                </label>
+            <!-- 3. Active Streaks Counter -->
+            <div class="text-sm text-gray-500 font-medium mt-0.5">
+                Active Streaks: <span class="text-gray-700 font-bold ml-1">${league.streakCount ?? 0}</span>
             </div>
         </div>
-    `).join('');
+        
+        <!-- Action Toggle Switch -->
+        <div class="flex items-center gap-4 cursor-default" onmousedown="event.stopPropagation()">
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="sr-only peer" 
+                    ${league.is_visible ? 'checked' : ''} 
+                    onchange="changeLeagueVisibility(${league.id}, this.checked)">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+            </label>
+        </div>
+    </div>
+`).join('');
 
     // 3. SORTABLE LOGIC: Only initialize if currentFilter is 'all'
     if (currentFilter === 'all' && !searchQuery) {
@@ -483,6 +493,7 @@ const openConfigContainer = (containerId) => {
     bookmakerConfig.classList.add('hidden');
     document.getElementById('leaguesContainer').style.display = 'none'
     document.getElementById('openAllMArketsBtn').style.display = 'none'
+    document.getElementById('records-container').style.display = 'none'
 
     leagueBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
     bookmakerBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
@@ -508,5 +519,6 @@ const openConfigContainer = (containerId) => {
         document.getElementById('leaguesContainer').style.display = 'block'
         recordsViewBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
         document.getElementById('openAllMArketsBtn').style.display = 'block'
+        document.getElementById('records-container').style.display = 'block'
     }
 }
