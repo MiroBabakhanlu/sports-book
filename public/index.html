@@ -30,6 +30,7 @@
                 </li>
             </ul>
         </div>
+
         <div>
             <h4 class="px-6 text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">System</h4>
             <ul class="space-y-1">
@@ -40,10 +41,11 @@
                 <li class="px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors">
                     Notifications</li>
                 <a href="./stats.html"
-                    class="px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors"
+                    class="px-6 py-2.5 text-sm text-red-600 hover:bg-gray-50 cursor-pointer transition-colors"
                     id="switch-stats-page">
                     STATS</a>
             </ul>
+
         </div>
     </aside>
 
@@ -100,8 +102,8 @@
             </div>
 
             <div>
-                <h3 class="text-[11px] font-bold text-gray-400 tracking-wider mb-3 uppercase">Pinned to top of sidebar
-                </h3>
+                <!-- <h3 class="text-[11px] font-bold text-gray-400 tracking-wider mb-3 uppercase">Pinned to top of sidebar
+                </h3> -->
                 <div id="league-byorder-container"
                     class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
                 </div>
@@ -113,6 +115,17 @@
         </div>
 
     </main>
+
+    <div id="region-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold">Select Region</h3>
+                <button id="close-region-modal" class="text-gray-500">✕</button>
+            </div>
+
+            <div id="country-list" class="grid grid-cols-2 gap-2"></div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>

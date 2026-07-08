@@ -66,13 +66,14 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 dotenv.config();
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'media')));
 
 
 
 
 app.use('/api/teams', teamsRoutes);
 app.use('/api/admin', adminRoutes)
-app.use('/api/bookmaker',bookmakerRoutes )
+app.use('/api/bookmaker', bookmakerRoutes)
 
 
 
@@ -83,7 +84,7 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        // runPipelines(targetLeagues)
+        runPipelines(targetLeagues)
         // runOddsPipeline(activeLeagues);
         // startStreakWorker(targetLeagues);
         // require('./update-db');

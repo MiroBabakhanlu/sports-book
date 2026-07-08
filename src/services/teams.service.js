@@ -26,7 +26,9 @@ const STREAK_CHECK_SLUGS = [
 const teamsServices = {
     getLeagues: async () => {
         return await prisma.league.findMany({
-            orderBy: { name: 'asc' }
+            orderBy: {
+                display_order: 'asc'
+            }
         });
     },
 

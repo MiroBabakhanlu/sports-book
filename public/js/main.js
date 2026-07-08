@@ -271,9 +271,6 @@ function getColorForValue(value, avgValue) {
     const numVal = Number(value);
     const avgNum = Number(avgValue);
 
-    if (numVal === 0) {
-        return 'text-red-400 font-medium';
-    }
     if (numVal > avgNum) {
         return 'text-blue-600 font-bold bg-blue-50/50 rounded';
     }
@@ -876,24 +873,32 @@ function renderMarketComparisonTable(teamA, teamB) {
                 return i >= startIndex ? reversedMatches[i - startIndex] : null;
             });
 
+            const teamAvg = team === teamA ? avg : avgB;
+
             const mdValues = paddedMatches.map(m => {
                 if (!m) {
                     return `<td class="border px-2 py-1 text-xs text-center text-gray-400">-</td>`;
                 }
-                return `
-                    <td class="border px-2 py-1 text-xs text-center ${m.rawValue === 0 ? 'text-red-500' : 'text-gray-800'}">
-                        ${m.rawValue}
-                    </td>
-                `;
-            }).join('');
 
-            const teamAvg = team === teamA ? avg : avgB;
+                const rawValue = m.rawValue;
+
+                const cellClass = getColorForValue(
+                    rawValue,
+                    teamAvg?.avg_value ?? 0
+                );
+
+                return `
+        <td class="border px-2 py-1 text-xs text-center ${cellClass}">
+            ${rawValue}
+        </td>
+    `;
+            }).join('');
 
             return `
                 <tr>
                     <td class="border px-2 py-1 font-semibold sticky left-0 bg-white">${team.teamName}</td>
                     <td class="border px-2 py-1 text-center">${teamAvg ? Number(teamAvg.avg_value).toFixed(2) : 'N/A'}</td>
-                    <td class="border px-2 py-1 text-center text-red-600 font-bold">${teamAvg?.streak?.length || 0}</td>
+                    <td class="border px-2 py-1 text-center text-600 font-bold">${teamAvg?.streak?.length || 0}</td>
                     ${mdValues}
                 </tr>
             `;

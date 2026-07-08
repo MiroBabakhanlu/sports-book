@@ -8,7 +8,18 @@ let currentFilter = 'all';
 let leagueSortableInstance = null;
 let searchQuery = '';
 
-
+const countries = [
+    { name: "United States", code: "US" },
+    { name: "Armenia", code: "AM" },
+    { name: "France", code: "FR" },
+    { name: "Germany", code: "DE" },
+    { name: "United Kingdom", code: "GB" },
+    { name: "Spain", code: "ES" },
+    { name: "Italy", code: "IT" },
+    { name: "Brazil", code: "BR" },
+    { name: "Argentina", code: "AR" },
+    { name: "Japan", code: "JP" },
+];
 
 
 //events
@@ -50,6 +61,43 @@ const setupSearchListener = () => {
         searchQuery = e.target.value.toLowerCase();
         renderLeaguesListUI(); // Re-render when user types
     });
+}
+
+const setupBookmkerConfigListeners = () => {
+    let affiliateLinks = document.querySelectorAll('.affiliate-links-input')
+    affiliateLinks.forEach(input => {
+        input.addEventListener('input', (e) => {
+            let { name, value } = e.target;
+            console.log(e.target.name, e.target.value)
+            changeAffiliateLink(name, value)
+        });
+    });
+
+    let setDeafultBtns = document.querySelectorAll('.set-default-btn')
+    setDeafultBtns.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            let bookMakerId = btn.dataset.bookmakerId
+            console.log(bookMakerId)
+            const result = await setDefaultBookmaker(bookMakerId)
+            if (result?.data?.success) {
+                renderBookmakers();
+            }
+        })
+    })
+
+    let activeCHeckBoxs = document.querySelectorAll('.active-checkbox-input')
+    activeCHeckBoxs.forEach(input => {
+        input.addEventListener('click', (e) => {
+
+            setNewBookmakerStatus(input.dataset.bookmakerId, e.target.checked)
+        })
+    })
+
+    document.getElementById('close-region-modal')
+        .addEventListener('click', () => {
+            document.getElementById('region-modal')
+                .classList.add('hidden');
+        });
 }
 
 
@@ -105,10 +153,69 @@ const changeLeagueOrder = async (leagueIds) => {
 }
 
 
-getAllBookmakers = async () => {
+const getAllBookmakers = async () => {
     try {
         const response = await axios.get(`${API_BOOKMAKER_URL}/bookmakers`);
         return response.data?.data;
+    } catch (error) {
+        console.log(error)
+    }
+}
+const changeAffiliateLink = async (name, value) => {
+    try {
+        axios.post(`${API_BOOKMAKER_URL}/affiliate-link`, {
+            name: name,
+            value: value
+        })
+    } catch (error) {
+        console.log(error)
+    }
+}
+const setDefaultBookmaker = async (bookmakerId) => {
+    try {
+        const result = await axios.post(`${API_BOOKMAKER_URL}/set-default`, {
+            id: Number(bookmakerId)
+        })
+        return result;
+    } catch (error) {
+        console.log(error)
+    }
+}
+
+const setNewBookmakerStatus = async (bookmakerId, newStatus) => {
+    try {
+        axios.post(`${API_BOOKMAKER_URL}/change-active-status`, {
+            id: Number(bookmakerId),
+            status: newStatus
+        })
+    } catch (error) {
+        console.log(error)
+    }
+}
+
+const changeBookmakerRegions = async (bookmakerId, regionCode) => {
+    try {
+        const result = axios.post(`${API_BOOKMAKER_URL}/change-bookmaker-region`, {
+            id: Number(bookmakerId),
+            regionCode: regionCode
+        })
+        return result;
+    } catch (error) {
+        console.log(error)
+    }
+}
+
+const removeRegionFromBookmaker = async (bookmakerId, regionCode) => {
+    try {
+        console.log(bookmakerId, regionCode)
+        const result = await axios.post(`${API_BOOKMAKER_URL}/remove-bookmaker-region`, {
+            id: Number(bookmakerId),
+            regionCode: regionCode
+        })
+        if (result?.data?.success) {
+            renderBookmakers();
+            console.log('dddddddd')
+        }
     } catch (error) {
         console.log(error)
     }
@@ -231,17 +338,58 @@ const renderBookmakersUi = (response) => {
     bookmakerContainer.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6";
 
     bookmakerContainer.innerHTML = response.map((bookmaker) => `
-        <div class="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col gap-4">
+        <div class="bg-white border ${bookmaker?.is_default ? 'border-teal-500 ring-2 ring-teal-100' : 'border-gray-200'} rounded-xl p-6 shadow-sm flex flex-col gap-4">
             
             <div class="flex items-center gap-3">
                 <img src="${bookmaker?.logo_url}" alt="${bookmaker?.name}" class="w-10 h-10 object-contain rounded border border-gray-100"/>
-                <span class="text-lg font-bold text-gray-800">${bookmaker?.name}</span>
+                
+                <div class="flex items-center gap-2">
+                    <span class="text-lg font-bold text-gray-800">${bookmaker?.name}</span>
+
+                    ${bookmaker?.is_default ? `
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-700">
+                            ★ Default
+                        </span>
+                    ` : ''}
+                </div>
+
+                <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="active-checkbox-input sr-only peer toggle-active-btn" data-bookmaker-id="${bookmaker.id}" ${bookmaker.is_active ? 'checked' : ''}>
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
+                </label>
             </div>
 
             <div class="flex flex-col space-y-1">
                 <label class="text-sm font-medium text-gray-500">Affiliate Link</label>
-                <input type="text" value="${bookmaker?.affiliate_link || ''}" 
-                    class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" />
+                <input name="${bookmaker?.name}" type="text" value="${bookmaker?.affiliate_link || ''}" 
+                    class="affiliate-links-input w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" />
+            </div>
+
+            <div class="flex flex-col space-y-1">
+                <label class="text-sm font-medium text-gray-500">Set as default</label>
+
+                <button 
+                    data-bookmaker-id="${bookmaker?.id}"
+                    class="set-default-btn w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition
+                    ${bookmaker?.is_default
+            ? 'bg-teal-100 text-teal-700 border border-teal-300 cursor-default'
+            : 'bg-teal-600 text-white hover:bg-teal-700 shadow-sm'}"
+                >
+                    ${bookmaker?.is_default
+            ? `
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Current Default
+                        `
+            : `
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            Set as Default
+                        `
+        }
+                </button>
             </div>
 
             <div class="bg-gray-50 p-4 rounded-lg mt-2">
@@ -249,21 +397,76 @@ const renderBookmakersUi = (response) => {
                 <div class="flex flex-wrap gap-2 mt-2">
                     ${bookmaker?.regions.map((val) => `
                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                            ${val?.region_code || 'No region'}
+                            <img 
+                                src="https://flagcdn.com/w20/${val?.region_code?.toLowerCase()}.png" 
+                                alt="${val?.region_code || 'region'} flag"
+                                class="w-5 h-5 mr-1"
+                            >
+                            ${val?.region_code || 'No region'} 
+                            <span 
+                            onclick="removeRegionFromBookmaker(${bookmaker?.id}, '${val?.region_code}')"
+                            style="color:red; margin:10px; cursor:pointer;">
+                            X
+                            </span>
                         </span>
                     `).join('')}
                 </div>
                 
-                <button class="w-full mt-4 flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium py-2 rounded-lg transition shadow-sm">
+                <button 
+                    onclick="openRegionModal(${bookmaker?.id})"
+                    class="w-full mt-4 flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium py-2 rounded-lg transition shadow-sm">
+                    
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                     </svg>
+
                     Add region
                 </button>
             </div>
         </div>
     `).join('');
+
+    setupBookmkerConfigListeners();
 }
+
+const openRegionModal = (bookmakerId) => {
+    const modal = document.getElementById('region-modal');
+    const container = document.getElementById('country-list');
+
+    container.innerHTML = countries.map(country => `
+        <button 
+            class="flex items-center gap-2 p-2 border rounded hover:bg-gray-100"
+            data-region-code="${country.code}">
+            
+            <img 
+                src="https://flagcdn.com/w20/${country.code.toLowerCase()}.png"
+                class="w-5 h-5"
+            >
+
+            ${country.name}
+        </button>
+    `).join('');
+
+    modal.classList.remove('hidden');
+
+
+    // Add click listeners
+    container.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            console.log(btn.dataset.regionCode, bookmakerId);
+
+
+            const result = await changeBookmakerRegions(bookmakerId, btn.dataset.regionCode)
+
+            if (result.data.success) {
+                document.getElementById('close-region-modal').click();
+                renderBookmakers();
+            }
+            // later you can call your API here
+            // addBookmakerRegion(btn.dataset.regionCode)
+        });
+    });
+};
 
 //helper
 const openConfigContainer = (containerId) => {
