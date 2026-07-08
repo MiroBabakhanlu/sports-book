@@ -1,4 +1,4 @@
-const API_URL = '/api/teams';
+const API_TEAM_URL = '/api/teams';
 let selectedSeasonId = null;
 let selectedTeamId = null;
 let activeOpenLeagueId = null;
@@ -23,7 +23,7 @@ let filterByLeague = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        const response = await fetch(`${API_URL}/leagues`);
+        const response = await fetch(`${API_TEAM_URL}/leagues`);
         const result = await response.json();
         allLeaguesData = result?.data;
         if (!result.success) throw new Error(result.message);
@@ -91,7 +91,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         document.getElementById('dashboardPlaceholder').classList.add('hidden');
         document.getElementById('openAllMArketsBtn').click();
+        console.log(document.getElementById('openAllMArketsBtn'), 'hrllo')
     } catch (err) {
+        console.error(err)
         document.getElementById('leaguesContainer').innerHTML = `<div class="text-xs text-red-500 p-2">Error structural config loading.</div>`;
     }
 });
@@ -141,7 +143,7 @@ document.getElementById('openAllMArketsBtn').addEventListener('click', async () 
         const params = new URLSearchParams({ season: availableSeason });
         if (leagueId) params.append('leagueId', leagueId);
 
-        const response = await fetch(`${API_URL}/upcoming-games?${params.toString()}`);
+        const response = await fetch(`${API_TEAM_URL}/upcoming-games?${params.toString()}`);
         const result = await response.json();
         console.log(result);
         AllLeaguesResults.data.push(...(result.data));
@@ -500,7 +502,7 @@ async function selectTeam(teamId, teamName) {
     if (selectedBlock) selectedBlock.classList.add('border-blue-500', 'bg-blue-50/50', 'text-blue-600');
 
     try {
-        const response = await fetch(`${API_URL}/dashboard?teamId=${teamId}&seasonId=${selectedSeasonId}`);
+        const response = await fetch(`${API_TEAM_URL}/dashboard?teamId=${teamId}&seasonId=${selectedSeasonId}`);
         const result = await response.json();
         if (!result.success) throw new Error(result.message);
         const { averages } = result.data;
@@ -718,10 +720,10 @@ async function toggleLeagueDropdown(leagueId, leagueName) {
     activeOpenLeagueId = leagueId;
     dropdown.classList.remove('hidden');
     arrow.classList.add('rotate-180');
-    document.getElementById('navigationBreadcrumb').textContent = `League: ${leagueName} > Select Season`;
+    // document.getElementById('navigationBreadcrumb').textContent = `League: ${leagueName} > Select Season`;
 
     try {
-        const response = await fetch(`${API_URL}/seasons?leagueId=${leagueId}`);
+        const response = await fetch(`${API_TEAM_URL}/seasons?leagueId=${leagueId}`);
         const result = await response.json();
 
         dropdown.innerHTML = result.data.map(s => `
@@ -765,12 +767,12 @@ async function selectSeason(event, seasonId, seasonName, leagueName) {
     document.querySelectorAll('[id^="season-sub-btn-"]').forEach(b => b.classList.remove('border-blue-500', 'bg-blue-50/50', 'text-blue-600'));
     document.getElementById(`season-sub-btn-${seasonId}`).classList.add('border-blue-500', 'bg-blue-50/50', 'text-blue-600');
 
-    document.getElementById('navigationBreadcrumb').textContent = `League: ${leagueName} > Season: ${seasonName} > Select Team`;
+    // document.getElementById('navigationBreadcrumb').textContent = `League: ${leagueName} > Season: ${seasonName} > Select Team`;
 
     teamsContainer.innerHTML = `<div class="text-[10px] text-gray-400 text-center py-2 animate-pulse">Loading teams...</div>`;
 
     try {
-        const response = await fetch(`${API_URL}/teams?seasonId=${seasonId}`);
+        const response = await fetch(`${API_TEAM_URL}/teams?seasonId=${seasonId}`);
         const result = await response.json();
 
         if (result.data.length === 0) {
@@ -944,7 +946,7 @@ async function fetchAndRenderUpcomingMatches({ leagueId, teamId, seasonYear }) {
         const params = new URLSearchParams({ season: seasonYear });
         if (leagueId) params.append('leagueId', leagueId);
         if (teamId) params.append('teamId', teamId);
-        const response = await fetch(`${API_URL}/upcoming-games?${params.toString()}`);
+        const response = await fetch(`${API_TEAM_URL}/upcoming-games?${params.toString()}`);
         const result = await response.json();
         handleUpComingMatchesUi(result);
     } catch (err) {
@@ -1249,10 +1251,10 @@ function handleUpComingMatchesUi(result) {
                 const homeStreak = JSON.parse(el.dataset.homeStreak);
                 const awayStreak = JSON.parse(el.dataset.awayStreak);
 
-                const awayTeamData = await fetch(`${API_URL}/dashboard?teamId=${awayId}&seasonId=${currentSeasonId}`);
+                const awayTeamData = await fetch(`${API_TEAM_URL}/dashboard?teamId=${awayId}&seasonId=${currentSeasonId}`);
                 const awayTeamResults = await awayTeamData.json();
 
-                const homeTeamData = await fetch(`${API_URL}/dashboard?teamId=${homeId}&seasonId=${currentSeasonId}`);
+                const homeTeamData = await fetch(`${API_TEAM_URL}/dashboard?teamId=${homeId}&seasonId=${currentSeasonId}`);
                 const homeTeamResults = await homeTeamData.json();
 
                 if (typeof handleStreakPopUp === 'function') {
@@ -1275,6 +1277,3 @@ const getOddForPrediction = (market, direction, val) => {
     const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
     return found ? found.odd : null;
 };
-
-
-

@@ -84,7 +84,7 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        runPipelines(targetLeagues)
+        // runPipelines(targetLeagues)
         // runOddsPipeline(activeLeagues);
         // startStreakWorker(targetLeagues);
         // require('./update-db');

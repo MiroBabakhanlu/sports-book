@@ -1,7 +1,5 @@
-
 const API_URL = '/api/admin';
 const API_BOOKMAKER_URL = '/api/bookmaker';
-
 //states
 let leaguesCache = [];
 let currentFilter = 'all';
@@ -33,6 +31,10 @@ document.getElementById('leagueViewBtn').addEventListener('click', () => {
 
 document.getElementById('bookmakerViewBtn').addEventListener('click', () => {
     openConfigContainer('bookmaker-config-container');
+});
+
+document.getElementById('recordsViewBtn').addEventListener('click', () => {
+    openConfigContainer('records-container');
 });
 
 const setupFilterListeners = () => {
@@ -472,14 +474,20 @@ const openRegionModal = (bookmakerId) => {
 const openConfigContainer = (containerId) => {
     const leagueConfig = document.getElementById('league-config-container');
     const bookmakerConfig = document.getElementById('bookmaker-config-container');
+    const recordsView = document.getElementById('records-container');
     const leagueBtn = document.getElementById('leagueViewBtn');
     const bookmakerBtn = document.getElementById('bookmakerViewBtn');
+    const recordsBtn = document.getElementById('recordsViewBtn');
 
     leagueConfig.classList.add('hidden');
     bookmakerConfig.classList.add('hidden');
+    document.getElementById('leaguesContainer').style.display = 'none'
+    document.getElementById('openAllMArketsBtn').style.display = 'none'
 
     leagueBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
     bookmakerBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
+    recordsViewBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
+
 
     if (containerId === 'league-config-container') {
         setupFilterListeners()
@@ -493,5 +501,12 @@ const openConfigContainer = (containerId) => {
         bookmakerConfig.classList.remove('hidden');
         bookmakerBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
         renderBookmakers();
+    }
+
+    if (containerId === 'records-container') {
+        recordsView.classList.remove('hidden');
+        document.getElementById('leaguesContainer').style.display = 'block'
+        recordsViewBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
+        document.getElementById('openAllMArketsBtn').style.display = 'block'
     }
 }
