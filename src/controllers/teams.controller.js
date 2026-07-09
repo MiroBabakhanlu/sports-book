@@ -42,15 +42,23 @@ const teamsController = {
 
     getUpcomingMatches: async (req, res, next) => {
         try {
-            const { leagueId, teamId, season } = req.query;
+            const { leagueIds, teamId, season } = req.query;
 
             if (!season) {
                 return res.status(400).json({ error: "Season parameter is required." });
             }
 
+            // Parse comma-separated string into an array of integers
+            let parsedLeagueIds = undefined;
+            if (leagueIds) {
+                parsedLeagueIds = leagueIds.split(',').map(id => parseInt(id, 10)).filter(Boolean);
+            } else if (req.query.leagueId) {
+                parsedLeagueIds = [parseInt(req.query.leagueId, 10)];
+            }
+
             const data = await teamsServices.getUpcomingMatches({
-                leagueId: leagueId ? parseInt(leagueId) : undefined,
-                teamId: teamId ? parseInt(teamId) : undefined,
+                leagueIds: parsedLeagueIds,
+                teamId: teamId ? parseInt(teamId, 10) : undefined,
                 seasonYear: season
             });
 

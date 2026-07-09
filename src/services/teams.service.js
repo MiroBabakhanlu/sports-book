@@ -231,22 +231,18 @@ const teamsServices = {
     },
 
 
-    getUpcomingMatches: async ({ leagueId, teamId, seasonYear }) => {
+    getUpcomingMatches: async ({ leagueIds, teamId, seasonYear }) => {
         const now = new Date();
-
-        // console.log(`\n🔍 Searching Upcoming Matches - League: ${leagueId || 'N/A'}, Team: ${teamId || 'N/A'}, Season: ${seasonYear}`);
 
         const targetBookmaker = await prisma.bookmaker.findUnique({
             where: { name: 'Bet365' }
         });
-        const targetBookmakerId = targetBookmaker.id;
-        if (!targetBookmakerId) {
+        if (!targetBookmaker) {
             throw new AppError('could not find that given bookmaker name', 400);
         }
+        const targetBookmakerId = targetBookmaker.id;
 
-        // 1. Build dynamic match filter based on input parameters
         const matchWhereClause = {
-            // FIX: Now includes both Not Started and Postponed matches
             status: { in: ['NS', 'PST'] },
             kickoff_at: { gte: now },
             season: {
@@ -254,8 +250,9 @@ const teamsServices = {
             }
         };
 
-        if (leagueId) {
-            matchWhereClause.season.league_id = parseInt(leagueId);
+        // Use Prisma's "in" operator to query multiple leagues at once
+        if (leagueIds && leagueIds.length > 0) {
+            matchWhereClause.season.league_id = { in: leagueIds };
         }
 
         if (teamId) {
@@ -265,7 +262,6 @@ const teamsServices = {
             ];
         }
 
-        // 2. Fetch matches along with odds data
         const matches = await prisma.match.findMany({
             where: matchWhereClause,
             include: {
@@ -289,64 +285,77 @@ const teamsServices = {
                 }
             },
             orderBy: { kickoff_at: 'asc' },
-            // If checking a specific team, pull only their single closest upcoming game
             ...(teamId ? { take: 1 } : {})
         });
 
         console.log(`Found ${matches.length} total upcoming matches in database query.`);
         if (matches.length === 0) return [];
 
-        // 3. FIX: Track the absolute closest timeline match per unique team.
-        // This perfectly mimics the SQL window function strategy.
         const validMatches = [];
-
         if (teamId) {
-            // Prisma's `take: 1` already isolated the single next game for this team
             validMatches.push(matches[0]);
         } else {
-            const teamNextMatches = new Map(); // tracks: team_id -> closest match object
-
+            const teamNextMatches = new Map();
             for (const match of matches) {
-                // First time seeing the home team? This is chronologically their absolute next match.
-                if (!teamNextMatches.has(match.home_team_id)) {
-                    teamNextMatches.set(match.home_team_id, match);
-                }
-                // First time seeing the away team? This is chronologically their absolute next match.
-                if (!teamNextMatches.has(match.away_team_id)) {
-                    teamNextMatches.set(match.away_team_id, match);
-                }
+                if (!teamNextMatches.has(match.home_team_id)) teamNextMatches.set(match.home_team_id, match);
+                if (!teamNextMatches.has(match.away_team_id)) teamNextMatches.set(match.away_team_id, match);
             }
-
-            // Deduplicate values back into a clean array since single matches contain two teams
             validMatches.push(...Array.from(new Set(teamNextMatches.values())));
         }
 
-        // 4. Pre-fetch target markets for stats and streak verification
         const allMarkets = await prisma.market.findMany({
             where: { slug: { in: STREAK_CHECK_SLUGS } }
         });
         const streakMarketIds = allMarkets.map(m => m.id);
 
-        // 5. Process ONLY the valid next matches parallelly
-        const result = await Promise.all(validMatches.map(async (match) => {
+        // -----------------------------------------------------------------
+        // MASSIVE OPTIMIZATION: BATCH FETCH ALL AVERAGES & STREAKS UPFRONT
+        // -----------------------------------------------------------------
+        const uniqueTeamIds = [...new Set(validMatches.flatMap(m => [m.home_team_id, m.away_team_id]))];
+        const uniqueSeasonIds = [...new Set(validMatches.map(m => m.season_id))];
+
+        const [allAverages, allStreaks] = await Promise.all([
+            prisma.teamSeasonAverage.findMany({
+                where: {
+                    team_id: { in: uniqueTeamIds },
+                    market_id: { in: streakMarketIds },
+                    season_id: { in: uniqueSeasonIds }
+                }
+            }),
+            prisma.teamStreak.findMany({
+                where: {
+                    team_id: { in: uniqueTeamIds },
+                    market_id: { in: streakMarketIds },
+                    season_id: { in: uniqueSeasonIds }
+                }
+            })
+        ]);
+
+        // Construct highly performant lookup maps out of database rows
+        const averageMap = new Map();
+        allAverages.forEach(avg => {
+            averageMap.set(`${avg.team_id}-${avg.market_id}-${avg.season_id}`, avg);
+        });
+
+        const streakMap = new Map();
+        allStreaks.forEach(str => {
+            streakMap.set(`${str.team_id}-${str.market_id}-${str.season_id}`, str);
+        });
+        // -----------------------------------------------------------------
+
+        const result = validMatches.map((match) => {
             const hasOddsRecords = match.matchOdds.length > 0;
 
-            // FALLBACK PATH: If there are no odds, check if either team has a high streak (>= 3)
             if (!hasOddsRecords) {
-                const hasHighStreak = await prisma.teamStreak.findFirst({
-                    where: {
-                        season_id: match.season_id,
-                        market_id: { in: streakMarketIds },
-                        team_id: { in: [match.home_team_id, match.away_team_id] },
-                        streak_length: { gte: 3 }
-                    }
-                });
-
-                // If neither team has a high streak, return null (dead-end this match)
-                if (!hasHighStreak) return null;
+                // Memory check fallback step instead of hitting database again
+                const matchHasHighStreak = allStreaks.some(str =>
+                    str.season_id === match.season_id &&
+                    [match.home_team_id, match.away_team_id].includes(str.team_id) &&
+                    str.streak_length >= 3
+                );
+                if (!matchHasHighStreak) return null;
             }
 
-            // Map out available odds into memory structure
             const oddsByMarket = {};
             match.matchOdds.forEach(o => {
                 const slug = o.market.slug;
@@ -359,20 +368,15 @@ const teamsServices = {
 
             const marketData = [];
 
-            // 6. Gather statistical data for the mapped target markets
             for (const [rawSlug, canonicalSlug] of Object.entries(SLUG_MAP)) {
                 const marketRecord = allMarkets.find(m => m.slug === canonicalSlug);
                 if (!marketRecord) continue;
 
-                const getTeamData = async (teamId) => {
-                    const [avg, streak] = await Promise.all([
-                        prisma.teamSeasonAverage.findFirst({
-                            where: { team_id: teamId, market_id: marketRecord.id, season_id: match.season_id }
-                        }),
-                        prisma.teamStreak.findFirst({
-                            where: { team_id: teamId, market_id: marketRecord.id, season_id: match.season_id }
-                        })
-                    ]);
+                // Synchronous lookup function pulling items from memory maps
+                const getTeamDataFromMemory = (teamId) => {
+                    const mapKey = `${teamId}-${marketRecord.id}-${match.season_id}`;
+                    const avg = averageMap.get(mapKey);
+                    const streak = streakMap.get(mapKey);
 
                     const val = avg ? Number(avg.avg_value) : 0;
                     return {
@@ -385,8 +389,8 @@ const teamsServices = {
                     };
                 };
 
-                const homeTeamData = await getTeamData(match.home_team_id);
-                const awayTeamData = await getTeamData(match.away_team_id);
+                const homeTeamData = getTeamDataFromMemory(match.home_team_id);
+                const awayTeamData = getTeamDataFromMemory(match.away_team_id);
 
                 const currentMarketOdds = oddsByMarket[rawSlug] || [];
                 const homeStreakLen = homeTeamData.streak?.length || 0;
@@ -417,7 +421,7 @@ const teamsServices = {
                 matchWinnerOdds: oddsByMarket['match-winner'] || [],
                 marketData
             };
-        }));
+        });
 
         const filteredResult = result.filter(Boolean);
         console.log(`📊 Pipeline finished. Returning ${filteredResult.length} absolute next matches.`);
