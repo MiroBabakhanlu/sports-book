@@ -320,7 +320,7 @@ function openTableView() {
     }
 
     let tableHTML = `
-        <div class="overflow-x-auto">
+<div class="overflow-x-auto xl:overflow-visible">
             <div class="mb-3 text-xs text-gray-500">
                 <span class="inline-flex items-center gap-2 mr-4">
                     <span class="inline-block w-3 h-3 rounded bg-red-400"></span> Zero (0)
@@ -727,16 +727,24 @@ async function toggleLeagueDropdown(leagueId, leagueName) {
         const result = await response.json();
 
         dropdown.innerHTML = result.data.map(s => `
-                    <div class="space-y-1 mb-1">
-                        <button onclick="selectSeason(event, ${s.id}, '${s.year || s.name}', '${leagueName.replace(/'/g, "\\'")}')"
-                            id="season-sub-btn-${s.id}"
-                            class="w-full text-left bg-white hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded text-[11px] font-medium text-gray-600 flex justify-between items-center transition-colors">
-                            <span>Season ${s.year || s.name}</span>
-                            <span id="season-arrow-${s.id}" class="text-gray-400 text-[9px] font-mono">&rarr;</span>
-                        </button>
-                        <div id="season-teams-container-${s.id}" class="hidden pl-1.5 py-1 space-y-1 flex flex-col bg-gray-100/40 border border-gray-100/70 rounded"></div>
-                    </div>
-                `).join('');
+    <div class="space-y-1 mb-1">
+        <button onclick="selectSeason(event, ${s.id}, '${s.year || s.name}', '${leagueName.replace(/'/g, "\\'")}')"
+            id="season-sub-btn-${s.id}"
+            class="w-full text-left bg-white hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded text-[11px] font-medium text-gray-600 flex justify-between items-center transition-colors">
+            <span>Season ${s.year || s.name}</span>
+            <span id="season-arrow-${s.id}" class="text-gray-400 text-[9px] font-mono">&rarr;</span>
+        </button>
+        <div id="season-teams-container-${s.id}" class="hidden pl-1.5 py-1 space-y-1 flex flex-col bg-gray-100/40 border border-gray-100/70 rounded"></div>
+    </div>
+`).join('');
+
+        // Automatically click 2026 season
+        const defaultSeason = result.data.find(s => s.year == '2026');
+
+        if (defaultSeason) {
+            console.log(defaultSeason)
+            selectSeason(null, defaultSeason?.id, defaultSeason?.year, leagueName)
+        }
 
 
     } catch (err) {
@@ -746,7 +754,7 @@ async function toggleLeagueDropdown(leagueId, leagueName) {
 
 async function selectSeason(event, seasonId, seasonName, leagueName) {
 
-    event.stopPropagation();
+    if (event) event.stopPropagation();
     selectedSeasonId = seasonId;
     selectedSeasonYear = seasonName;
     const teamsContainer = document.getElementById(`season-teams-container-${seasonId}`);
