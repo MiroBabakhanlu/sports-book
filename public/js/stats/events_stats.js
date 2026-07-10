@@ -36,73 +36,208 @@ export function loadStatEvents() {
             if (!result.success) throw new Error(result.message);
 
             const leaguesContainer = document.getElementById('leaguesContainer');
-            leaguesContainer.innerHTML = result.data.map(l => `
-                    <div class="border border-gray-100 rounded-lg overflow-hidden bg-white mb-1">
-                        <button onclick="toggleLeagueDropdown(${l.id}, '${l.name.replace(/'/g, "\\'")}')"
-                            id="league-btn-${l.id}"
-                            data-league-name="${l.name}"
-                            class="w-full text-left bg-white hover:bg-gray-50 px-3 py-2.5 text-xs font-semibold transition-all flex justify-between items-center text-gray-700 border-b border-transparent">
-                            
-                            <span class="flex items-center gap-2">
-                                <!-- Dynamic Checkbox Input for Filtering -->
-                                <input type="checkbox" 
-                                    id="league-chk-${l.id}"
-                                    data-league-id="${l.id}"
-                                    class="league-filter-chk w-3.5 h-3.5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 cursor-pointer mr-0.5">
-                                
-                                <span>${l.name} ${l?.country || ''}</span>
-                                <span id="sidebar-count-${l.id}" class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full text-[9px] font-bold">0</span>
-                            </span>
-                            
-                            <span id="arrow-${l.id}" class="text-[10px] text-gray-400 transform transition-transform duration-200">&darr;</span>
-                        </button>
-                        <div id="dropdown-seasons-${l.id}" class="hidden bg-gray-50/50 px-2 py-1.5 space-y-1 border-t border-gray-150">
-                            <div class="text-[11px] text-gray-400 italic p-1 text-center">Loading seasons...</div>
-                        </div>
-                    </div>
-                `).join('');
 
-            // --- Event Listener for Checkboxes ---
-            leaguesContainer.querySelectorAll('.league-filter-chk').forEach(chk => {
-                chk.addEventListener('click', (e) => {
-                    if (state.neededDataForUpCOmmingGames) {
-                        handleUpComingMatchesUi(state.neededDataForUpCOmmingGames)
+            leaguesContainer.innerHTML = result.data.map(l => `
+            <div class="border border-gray-100 rounded-lg overflow-hidden bg-white mb-1">
+                <button id="league-btn-${l.id}"
+                    data-league-id="${l.id}"
+                    data-league-name="${l.name}"
+                    class="league-btn w-full text-left bg-white hover:bg-gray-50 px-3 py-2.5 text-xs font-semibold transition-all flex justify-between items-center text-gray-700 border-l-4 border-transparent">
+
+                    <span class="flex items-center gap-2">
+                        <span>${l.name} ${l?.country || ''}</span>
+                        <span id="sidebar-count-${l.id}" class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full text-[9px] font-bold">0</span>
+                    </span>
+
+                    <span
+                        id="arrow-${l.id}"
+                        class="text-[10px] text-gray-400 transform transition-transform duration-200 cursor-pointer px-2"
+                        onclick="toggleLeagueDropdown(${l.id}, '${l.name.replace(/'/g, "\\'")}')"
+                    >&darr;</span>
+                </button>
+
+                <div id="dropdown-seasons-${l.id}" class="hidden bg-gray-50/50 px-2 py-1.5 space-y-1 border-t border-gray-150">
+                    <div class="text-[11px] text-gray-400 italic p-1 text-center">
+                        Loading seasons...
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+
+            leaguesContainer.querySelectorAll('.league-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const leagueId = parseInt(btn.dataset.leagueId);
+                    const leagueName = btn.dataset.leagueName;
+
+                    // Ignore arrow click
+                    if (e.target.closest(`#arrow-${leagueId}`)) {
+                        return;
                     }
 
-                    // Prevents the button's onclick event from triggering the dropdown
-                    e.stopPropagation();
 
-                    const leagueId = parseInt(chk.dataset.leagueId);
+                    if (state.neededDataForUpCOmmingGames) {
+                        handleUpComingMatchesUi(state.neededDataForUpCOmmingGames);
+                    }
 
-                    if (chk.checked) {
-                        state.filterByLeague = leagueId;
 
-                        // Uncheck all other checkboxes to ensure single selection
-                        leaguesContainer.querySelectorAll('.league-filter-chk').forEach(otherChk => {
-                            if (otherChk !== chk) otherChk.checked = false;
-                        });
-                    } else {
-                        // If the current active checkbox is unticked, clear the filter variable
-                        if (state.filterByLeague === leagueId) {
+                    const isTeamSelected =
+                        state.filterByTeam !== null &&
+                        state.filterByTeam !== undefined;
+
+
+
+                    // SAME LEAGUE CLICKED
+                    if (state.filterByLeague === leagueId) {
+
+                        if (isTeamSelected) {
+
+                            // Team selected -> clicking league
+                            // Remove team filter but keep league and dropdown open
+                            state.filterByTeam = null;
+                            state.filterByLeague = leagueId;
+
+
+                            btn.classList.remove(
+                                'bg-white',
+                                'text-gray-700',
+                                'border-transparent'
+                            );
+
+                            btn.classList.add(
+                                'bg-purple-50',
+                                'text-purple-700',
+                                'border-purple-500'
+                            );
+
+
+                            // Make sure dropdown stays open
+                            const dropdown = document.getElementById(
+                                `dropdown-seasons-${leagueId}`
+                            );
+
+                            if (dropdown.classList.contains('hidden')) {
+                                toggleLeagueDropdown(
+                                    leagueId,
+                                    leagueName
+                                );
+                            }
+
+
+                        } else {
+
+                            // Same league clicked again with no team selected
+                            // Remove league filter and close dropdown
                             state.filterByLeague = null;
+
+
+                            btn.classList.remove(
+                                'bg-purple-50',
+                                'text-purple-700',
+                                'border-purple-500'
+                            );
+
+                            btn.classList.add(
+                                'bg-white',
+                                'text-gray-700',
+                                'border-transparent'
+                            );
+
+
+                            const dropdown = document.getElementById(
+                                `dropdown-seasons-${leagueId}`
+                            );
+
+                            if (!dropdown.classList.contains('hidden')) {
+                                toggleLeagueDropdown(
+                                    leagueId,
+                                    leagueName
+                                );
+                            }
+                        }
+
+
+
+                    } else {
+
+                        // NEW LEAGUE SELECTED
+                        state.filterByLeague = leagueId;
+                        state.filterByTeam = null;
+
+
+                        // Reset other buttons
+                        leaguesContainer.querySelectorAll('.league-btn').forEach(otherBtn => {
+
+                            otherBtn.classList.remove(
+                                'bg-purple-50',
+                                'text-purple-700',
+                                'border-purple-500'
+                            );
+
+                            otherBtn.classList.add(
+                                'bg-white',
+                                'text-gray-700',
+                                'border-transparent'
+                            );
+                        });
+
+
+
+                        // Highlight selected league
+                        btn.classList.remove(
+                            'bg-white',
+                            'text-gray-700',
+                            'border-transparent'
+                        );
+
+                        btn.classList.add(
+                            'bg-purple-50',
+                            'text-purple-700',
+                            'border-purple-500'
+                        );
+
+
+
+                        // Open dropdown if actually hidden
+                        const dropdown = document.getElementById(
+                            `dropdown-seasons-${leagueId}`
+                        );
+
+                        if (dropdown.classList.contains('hidden')) {
+                            toggleLeagueDropdown(
+                                leagueId,
+                                leagueName
+                            );
                         }
                     }
+
+
+
                     if (typeof window.refreshInsightsDashboard === 'function') {
-                        console.log('window.refreshInsightsDashboard')
                         window.refreshInsightsDashboard();
                     }
 
-                    console.log('Selected League ID Filter:', state.filterByLeague);
 
+                    console.log(
+                        'League Filter:',
+                        state.filterByLeague,
+                        '| Team Filter:',
+                        state.filterByTeam
+                    );
                 });
             });
 
+
             document.getElementById('dashboardPlaceholder').classList.add('hidden');
             document.getElementById('openAllMArketsBtn').click();
-            console.log(document.getElementById('openAllMArketsBtn'), 'hrllo')
+
+
         } catch (err) {
-            console.error(err)
-            document.getElementById('leaguesContainer').innerHTML = `<div class="text-xs text-red-500 p-2">Error structural config loading.</div>`;
+
+            console.error(err);
+
+            document.getElementById('leaguesContainer').innerHTML =
+                `<div class="text-xs text-red-500 p-2">Error structural config loading.</div>`;
         }
     });
 
@@ -122,7 +257,7 @@ export function loadStatEvents() {
     })
     document.getElementById('openInDepthView').addEventListener('click', () => {
         openTab('in-depth-container')
-        openTableView();
+        // openTableView();
     })
     document.getElementById('league-games').addEventListener('click', () => {
         activeUpcomingFilter = 'league';

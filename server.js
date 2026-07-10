@@ -32,7 +32,11 @@ const targetLeagues = [
     [169, 2026],
     [71, 2026],
     [72, 2026],
-
+    [103, 2026], //good
+    [479, 2026], //good
+    [113, 2026], //good
+    [361, 2026], //good
+    [364, 2026], // good
 
 ];
 
@@ -57,6 +61,11 @@ const activeLeagues = [
     [169, 2026],
     [71, 2026],
     [72, 2026],
+    [103, 2026], //good
+    [479, 2026], //good
+    [113, 2026], //good
+    [361, 2026], //good
+    [364, 2026], // good
 
 ];
 const newLeagues = [
@@ -94,7 +103,7 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        // runPipelines(newLeagues)
+        runPipelines(newLeagues)
 
         // runOddsPipeline(newLeagues);
         // startStreakWorker(newLeagues);

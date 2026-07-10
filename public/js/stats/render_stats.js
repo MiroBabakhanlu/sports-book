@@ -10,6 +10,8 @@ const API_TEAM_URL = '/api/teams';
 
 
 
+let prevTab = null;
+
 export function renderTeamDashboard(data, teamId, teamName) {
     const { averages } = data;
     const finishedMatches = data.matches.filter(m =>
@@ -200,7 +202,9 @@ export function renderTeamDashboard(data, teamId, teamName) {
 }
 export async function selectTeam(teamId, teamName) {
     state.selectedTeamId = teamId;
+    console.log('state.filterByLeague ', state.filterByLeague)
     state.filterByLeague = null;
+    console.log('state.filterByLeague ', state.filterByLeague)
 
     // 3. Uncheck all UI checkboxes in the sidebar
     document.querySelectorAll('.league-filter-chk').forEach(chk => {
@@ -220,7 +224,13 @@ export async function selectTeam(teamId, teamName) {
         state.activeUpcomingFilter = 'team';
         updateUpcomingFilterUI('team');
     }
-    openTab('upcoming-matches-container');
+
+    if (!prevTab) {
+        openTab('upcoming-matches-container');
+        prevTab = 'upcoming-matches-container';
+    } else {
+        openTab(prevTab)
+    }
 }
 window.selectTeam = selectTeam;
 
@@ -232,7 +242,7 @@ export function renderSeasonsDropdown(dropdown, seasons, leagueName) {
 
     dropdown.innerHTML = seasons.map(s => `
     <div class="space-y-1 mb-1">
-        <button onclick="selectSeason(event, ${s.id}, '${s.year || s.name}', '${leagueName.replace(/'/g, "\\'")}')"
+        <button style= "display: none;" onclick="selectSeason(event, ${s.id}, '${s.year || s.name}', '${leagueName.replace(/'/g, "\\'")}')"
             id="season-sub-btn-${s.id}"
             class="w-full text-left bg-white hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded text-[11px] font-medium text-gray-600 flex justify-between items-center transition-colors">
             <span>Season ${s.year || s.name}</span>
@@ -329,6 +339,7 @@ export async function selectSeason(event, seasonId, seasonName, leagueName) {
     renderTeamsList(teamsContainer, teams);
 }
 export function renderInsightsDashboard(insights) {
+    console.log(' renderInsightsDashboard insights', insights)
     const container = document.getElementById('upcoming-matches-container');
     container.innerHTML = `<div class="p-8 text-center text-gray-400"><div class="animate-pulse">Loading analysis...</div></div>`;
 
@@ -926,15 +937,20 @@ export function openTab(tabName) {
 
     if (tabName === 'matchday-container') {
         finishedMatchesView.style.display = 'block';
+        prevTab = 'matchday-container';
     }
     if (tabName === 'team-avgs-container') {
         thisTeamMarketAvgsView.style.display = 'block';
+        prevTab = 'team-avgs-container';
     }
     if (tabName === 'upcoming-matches-container') {
         upcomingMatchesContainer.style.display = 'block';
+        prevTab = 'upcoming-matches-container';
         document.getElementById('upComingGamesSwitchContainer').style.display = 'block'
     }
     if (tabName === 'in-depth-container') {
+        prevTab = 'in-depth-container';
+        openTableView();
         inDepthContainer.style.display = 'block';
     }
 

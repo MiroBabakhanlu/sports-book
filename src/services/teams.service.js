@@ -234,7 +234,7 @@ const teamsServices = {
     getUpcomingMatches: async ({ leagueIds, teamId, seasonYear }) => {
         const now = new Date();
 
-        const targetBookmaker = await prisma.bookmaker.findUnique({
+        const targetBookmaker = await prisma.bookmaker.findFirst({
             where: { name: 'Bet365' }
         });
         if (!targetBookmaker) {
