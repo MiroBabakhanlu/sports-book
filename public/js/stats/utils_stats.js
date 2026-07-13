@@ -62,11 +62,21 @@ export const getOddForPrediction = (market, direction, val) => {
 };
 
 export function prepareInsightsData(result) {
+
     const insights = [];
 
     result.data.forEach(match => {
-        const homeOddObj = match.matchWinnerOdds?.find(o => o.selection === 'home');
-        const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
+
+        const mwOdds = match.matchWinnerOdds || [];
+
+        // Pick the best (highest) odd per selection to display on the card
+        const pickBest = (selection) =>
+            mwOdds
+                .filter(o => o.selection === selection)
+                .sort((a, b) => Number(b.odd) - Number(a.odd))[0] || null;
+
+        const homeOddObj = pickBest('home');
+        const awayOddObj = pickBest('away');
 
         match.marketData.forEach(m => {
             // ⭐ 1. Grab ALL available odds for this market on this match
@@ -88,6 +98,9 @@ export function prepareInsightsData(result) {
                 insights.push({
                     match, isHome: true, market: m,
                     homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                    matchWinnerOdds: match.matchWinnerOdds || [],
+                    homeOddLogo: homeOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
+                    awayOddLogo: awayOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
                     streakCount: m.home.streak.length,
                     suggestedValue: m.home.suggestedValue,
                     avgValue: m.home.avg_value,
@@ -106,6 +119,9 @@ export function prepareInsightsData(result) {
                 insights.push({
                     match, isHome: false, market: m,
                     homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
+                    matchWinnerOdds: match.matchWinnerOdds || [],
+                    homeOddLogo: homeOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
+                    awayOddLogo: awayOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
                     streakCount: m.away.streak.length,
                     suggestedValue: m.away.suggestedValue,
                     avgValue: m.away.avg_value,

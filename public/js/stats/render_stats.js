@@ -515,6 +515,100 @@ export function renderInsightsDashboard(insights) {
     };
     // ==========================================
 
+    const openMatchWinnerModal = (insight, highlightSelection = null) => {
+        const allOdds = insight.matchWinnerOdds || [];
+
+        // Group by bookmaker
+        const bookmakerGroups = {};
+        allOdds.forEach(odd => {
+            const id = odd.bookmaker?.id || 'unknown';
+            if (!bookmakerGroups[id]) {
+                bookmakerGroups[id] = {
+                    name: odd.bookmaker?.name || 'Unknown',
+                    logo: odd.bookmaker?.logo_url || '',
+                    odds: []
+                };
+            }
+            bookmakerGroups[id].odds.push(odd);
+        });
+
+        let modal = document.getElementById('odds-compare-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'odds-compare-modal';
+            modal.className = 'fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-300';
+            document.body.appendChild(modal);
+        }
+
+        const order = { home: 0, draw: 1, away: 2 }; // keep 1-X-2 ordering per bookmaker
+
+        const bookmakersHtml = Object.values(bookmakerGroups).map(bk => {
+            bk.odds.sort((a, b) =>
+                (order[(a.selection || '').toLowerCase()] ?? 99) -
+                (order[(b.selection || '').toLowerCase()] ?? 99)
+            );
+
+            return `
+        <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all">
+            <div class="flex items-center gap-3 mb-3 pb-3 border-b border-gray-100">
+                ${bk.logo
+                    ? `<img src="${bk.logo}" class="h-8 max-w-[100px] object-contain" alt="${bk.name}" />`
+                    : `<span class="text-sm font-bold text-gray-700">${bk.name}</span>`}
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+                ${bk.odds.map(odd => {
+                        const sel = (odd.selection || '').toLowerCase();
+                        const isHighlight = highlightSelection && sel === highlightSelection.toLowerCase();
+                        return `
+                        <div class="flex flex-col items-center justify-center p-2 rounded-lg ${isHighlight
+                                ? 'bg-blue-50 border border-blue-200'
+                                : 'bg-gray-50 border border-gray-100'}">
+                            <span class="text-[10px] font-bold uppercase ${isHighlight ? 'text-blue-700' : 'text-gray-500'}">${sel}</span>
+                            <span class="text-sm font-black ${isHighlight ? 'text-blue-600' : 'text-gray-800'}">${odd.odd}</span>
+                        </div>`;
+                    }).join('')}
+            </div>
+        </div>`;
+        }).join('');
+
+        modal.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden transform scale-95 transition-transform duration-300" id="odds-modal-content">
+        <div class="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-6 flex justify-between items-center">
+            <div>
+                <div class="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">
+                    ${insight.match.homeTeam.name} vs ${insight.match.awayTeam.name}
+                </div>
+                <h2 class="text-2xl font-black">Match Winner - All Bookmaker Odds</h2>
+            </div>
+            <button id="close-odds-modal" class="text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-full p-2 transition-colors">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="p-6 bg-gray-50 max-h-[65vh] overflow-y-auto">
+            ${allOdds.length === 0 ? `
+                <div class="text-center text-gray-400 italic py-12">
+                    <p class="text-lg font-bold">No match winner odds available</p>
+                </div>
+            ` : `
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    ${bookmakersHtml}
+                </div>
+            `}
+        </div>
+    </div>`;
+
+        modal.classList.remove('opacity-0', 'pointer-events-none');
+        setTimeout(() => modal.querySelector('#odds-modal-content').classList.remove('scale-95'), 10);
+
+        const closeModal = () => {
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modal.querySelector('#odds-modal-content').classList.add('scale-95');
+        };
+        modal.querySelector('#close-odds-modal').addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    };
 
     // 4. Reactive Render Function
     const render = () => {
@@ -608,7 +702,13 @@ export function renderInsightsDashboard(insights) {
                                     <div class="flex flex-col items-center w-1/3 mt-2">
                                         <img src="${i.match.homeTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
                                         <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.homeTeam.name}</div>
-                                        <div class="mt-1 text-[10px] font-bold ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.homeOdd}</div>
+                                ${(i.matchWinnerOdds && i.matchWinnerOdds.length)
+                    ? `<button data-insight-index="${index}" data-mw-selection="home"
+                                                    class="mw-odd-trigger mt-1 flex items-center gap-1 ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded hover:ring-2 hover:ring-blue-400 transition-all cursor-pointer">
+                                                    ${i.homeOddLogo ? `<img src="${i.homeOddLogo}" class="h-3 max-w-[40px] object-contain" alt="bk" />` : ''}
+                                                    <span class="text-[10px] font-bold">${i.homeOdd}</span>
+                                                </button>`
+                    : `<div class="mt-1 text-[10px] font-bold ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.homeOdd}</div>`}
                                     </div>
                                     <div
                                      data-home-id="${i.match.homeTeam.id}" data-away-id="${i.match.awayTeam.id}"
@@ -624,7 +724,13 @@ export function renderInsightsDashboard(insights) {
                                     <div class="flex flex-col items-center w-1/3 mt-2">
                                         <img src="${i.match.awayTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
                                         <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.awayTeam.name}</div>
-                                        <div class="mt-1 text-[10px] font-bold ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.awayOdd}</div>
+                                   ${(i.matchWinnerOdds && i.matchWinnerOdds.length)
+                    ? `<button data-insight-index="${index}" data-mw-selection="away"
+                                            class="mw-odd-trigger mt-1 flex items-center gap-1 ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded hover:ring-2 hover:ring-blue-400 transition-all cursor-pointer">
+                                            ${i.awayOddLogo ? `<img src="${i.awayOddLogo}" class="h-3 max-w-[40px] object-contain" alt="bk" />` : ''}
+                                            <span class="text-[10px] font-bold">${i.awayOdd}</span>
+                                        </button>`
+                    : `<div class="mt-1 text-[10px] font-bold ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded">${i.awayOdd}</div>`}
                                     </div>
                                 </div>
 
@@ -757,7 +863,17 @@ export function renderInsightsDashboard(insights) {
                 }
             });
         });
+
+        container.querySelectorAll('.mw-odd-trigger').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.dataset.insightIndex);
+                const insightData = paginatedInsights[idx];
+                openMatchWinnerModal(insightData, btn.dataset.mwSelection);
+            });
+        });
     };
+
 
     window.refreshInsightsDashboard = render;
     render();
