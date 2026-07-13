@@ -338,8 +338,19 @@ export async function selectSeason(event, seasonId, seasonName, leagueName) {
     const teams = await fetchTeamsForSeason(seasonId);
     renderTeamsList(teamsContainer, teams);
 }
+
+
 export function renderInsightsDashboard(insights) {
     console.log(' renderInsightsDashboard insights', insights)
+
+    // ⭐ FIX: Ensure team specific markets match the team executing the streak line
+    insights = insights.filter(i => {
+        const slug = i.market.marketSlug.toLowerCase();
+        if (slug.includes('home') && !i.isHome) return false;
+        if (slug.includes('away') && i.isHome) return false;
+        return true;
+    });
+
     const container = document.getElementById('upcoming-matches-container');
     container.innerHTML = `<div class="p-8 text-center text-gray-400"><div class="animate-pulse">Loading analysis...</div></div>`;
 
@@ -355,9 +366,155 @@ export function renderInsightsDashboard(insights) {
     let selectedMarkets = [];
     let currentPage = 1;
     const itemsPerPage = 10;
-
-    // Keep track of the external league filter to know when it changes
     let lastLeagueFilter = typeof state.filterByLeague !== 'undefined' ? state.filterByLeague : null;
+
+    // ==========================================
+    // ⭐ NEW: The Modal Render Function
+    // ==========================================
+    const openOddsModal = (insight) => {
+        const teamName = insight.isHome ? insight.match.homeTeam.name : insight.match.awayTeam.name;
+        const marketName = insight.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+
+        // Get ALL odds (not filtered)
+        const allOdds = insight.market.odds || [];
+
+        // Group odds by bookmaker
+        const bookmakerGroups = {};
+        allOdds.forEach(odd => {
+            const bookmakerId = odd.bookmaker?.id || 'unknown';
+            const bookmakerName = odd.bookmaker?.name || 'Unknown';
+            const bookmakerLogo = odd.bookmaker?.logo_url || '';
+
+            if (!bookmakerGroups[bookmakerId]) {
+                bookmakerGroups[bookmakerId] = {
+                    name: bookmakerName,
+                    logo: bookmakerLogo,
+                    odds: []
+                };
+            }
+            bookmakerGroups[bookmakerId].odds.push(odd);
+        });
+
+        // Create the Modal Container if it doesn't exist
+        let modal = document.getElementById('odds-compare-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'odds-compare-modal';
+            modal.className = 'fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-300';
+            document.body.appendChild(modal);
+        }
+
+        // Generate HTML for each bookmaker's odds
+        const bookmakersHtml = Object.values(bookmakerGroups).map(bookmaker => {
+            // Sort odds numerically
+            bookmaker.odds.sort((a, b) => {
+                const aNum = parseFloat(a.odd);
+                const bNum = parseFloat(b.odd);
+                return aNum - bNum;
+            });
+
+            return `
+            <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all">
+                <!-- Bookmaker Header -->
+                <div class="flex items-center gap-3 mb-3 pb-3 border-b border-gray-100">
+                    ${bookmaker.logo
+                    ? `<img src="${bookmaker.logo}" class="h-8 max-w-[100px] object-contain" alt="${bookmaker.name}" />`
+                    : `<span class="text-sm font-bold text-gray-700">${bookmaker.name}</span>`
+                }
+                </div>
+                
+                <!-- Odds Grid -->
+                <div class="grid grid-cols-2 gap-2">
+                    ${bookmaker.odds.map(odd => {
+                    const isPredictedSelection = odd.selection.toLowerCase() === `${insight.direction.toLowerCase()}-${insight.suggestedValue}`;
+
+                    return `
+                            <div class="flex items-center justify-between p-2 rounded-lg ${isPredictedSelection
+                            ? 'bg-blue-50 border border-blue-200'
+                            : 'bg-gray-50 border border-gray-100'
+                        }">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-[11px] font-bold ${isPredictedSelection
+                            ? 'text-blue-700'
+                            : 'text-gray-700'
+                        }">${odd.selection.replace('-', ' ').toUpperCase()}</span>
+                                    ${isPredictedSelection
+                            ? ''
+                            : ''}
+                                </div>
+                                <span class="text-sm font-black ${isPredictedSelection
+                            ? 'text-blue-600'
+                            : 'text-gray-800'
+                        }">${odd.odd}</span>
+                            </div>
+                        `;
+                }).join('')}
+                </div>
+            </div>
+        `;
+        }).join('');
+
+        // Inject HTML into the modal
+        modal.innerHTML = `
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden transform scale-95 transition-transform duration-300" id="odds-modal-content">
+            <!-- Modal Header -->
+            <div class="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-6 flex justify-between items-center">
+                <div>
+                    <div class="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">
+                        ${insight.match.homeTeam.name} vs ${insight.match.awayTeam.name}
+                    </div>
+                    <h2 class="text-2xl font-black">${marketName} - All Bookmaker Odds</h2>
+                    <div class="flex items-center gap-2 mt-2">
+                        <span class="text-sm text-blue-400 font-bold">
+                            Prediction: ${insight.direction} ${insight.suggestedValue} for ${teamName}
+                        </span>
+                    </div>
+                </div>
+                <button id="close-odds-modal" class="text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-full p-2 transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Modal Body -->
+            <div class="p-6 bg-gray-50 max-h-[65vh] overflow-y-auto">
+                ${allOdds.length === 0 ? `
+                    <div class="text-center text-gray-400 italic py-12">
+                        <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <p class="text-lg font-bold">No odds data available</p>
+                        <p class="text-sm mt-1">Check back later for updated odds</p>
+                    </div>
+                ` : `
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        ${bookmakersHtml}
+                    </div>
+                `}
+            </div>
+        </div>
+    `;
+
+        // Open Animation
+        modal.classList.remove('opacity-0', 'pointer-events-none');
+        setTimeout(() => {
+            modal.querySelector('#odds-modal-content').classList.remove('scale-95');
+        }, 10);
+
+        // Close logic
+        const closeModal = () => {
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modal.querySelector('#odds-modal-content').classList.add('scale-95');
+        };
+
+        modal.querySelector('#close-odds-modal').addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+    };
+    // ==========================================
+
 
     // 4. Reactive Render Function
     const render = () => {
@@ -367,11 +524,9 @@ export function renderInsightsDashboard(insights) {
             lastLeagueFilter = state.filterByLeague;
         }
 
-        // --- Dynamic Summary Count Calculations ---
         const marketCounts = {};
         allMarkets.forEach(m => marketCounts[m] = 0);
 
-        // Calculate Market counts (respecting the global filterByLeague)
         insights.forEach(i => {
             const leagueId = i.match.league_id || i.match.league?.id;
             if (typeof state.filterByLeague === 'undefined' || state.filterByLeague === null || state.filterByLeague === leagueId) {
@@ -380,36 +535,27 @@ export function renderInsightsDashboard(insights) {
             }
         });
 
-        // Get final list matching BOTH criteria (Markets + Global League Filter)
         const filteredInsights = insights.filter(i => {
             const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
             const leagueId = i.match.league_id || i.match.league?.id;
-
             const matchesMarket = selectedMarkets.length === 0 || selectedMarkets.includes(marketName);
             const matchesLeague = typeof state.filterByLeague === 'undefined' || state.filterByLeague === null || state.filterByLeague === leagueId;
-
             return matchesMarket && matchesLeague;
         });
 
-        // --- Pagination Logic ---
         const totalItems = filteredInsights.length;
         const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
-
-        // Safety check just in case current page goes out of bounds
-        if (currentPage > totalPages) {
-            currentPage = totalPages;
-        }
+        if (currentPage > totalPages) currentPage = totalPages;
 
         const startIndex = (currentPage - 1) * itemsPerPage;
         const endIndex = startIndex + itemsPerPage;
         const paginatedInsights = filteredInsights.slice(startIndex, endIndex);
 
         const isAnyFilterActive = selectedMarkets.length > 0 || (typeof state.filterByLeague !== 'undefined' && state.filterByLeague !== null);
-
         state.globalInsightVariable = insights;
+
         const summaryHtml = `
             <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col gap-3 mb-4 relative">
-                <!-- Market Row -->
                 <div class="flex flex-wrap gap-2 items-center">
                     <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">Markets:</span>
                     <div class="flex flex-wrap gap-2 flex-grow">
@@ -440,13 +586,14 @@ export function renderInsightsDashboard(insights) {
             </div>
         `;
 
-        // Render card layout elements (Now using paginatedInsights)
+        // Render card layout elements 
+        // ⭐ FIX: Added (i, index) so we can map the button click to the exact insight data
         container.innerHTML = `
             <div class="space-y-4">
                 ${summaryHtml}
                 ${paginatedInsights.length === 0 ? `
                     <div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 italic">No matches match the selected criteria.</div>
-                ` : paginatedInsights.map(i => {
+                ` : paginatedInsights.map((i, index) => {
             const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
             const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
             const fullPrediction = `${i.direction} ${i.suggestedValue}`;
@@ -485,10 +632,18 @@ export function renderInsightsDashboard(insights) {
                                     <div class="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prediction: ${marketName}</div>
                                     <div class="flex items-center gap-2 mb-1">
                                         <div class="text-xl font-black text-gray-800">${fullPrediction}</div>
-                                        ${i.specificOdd ? `<div class="bg-green-600 text-white text-[10px] px-2 py-1 rounded font-bold">${i.specificOdd}</div>` : ''}
+                                        
+                                        <!-- ⭐ NEW: Converted to a clickable button with hover effects and data-index -->
+                                        ${i.specificOdd ? `
+                                            <button data-insight-index="${index}" class="odd-popup-trigger flex items-center gap-1.5 bg-gray-50 border border-gray-200 hover:border-blue-400 hover:bg-blue-50 px-2 py-1 rounded shadow-sm transition-all cursor-pointer group">
+                                                ${i.bookmakerLogoUrl ? `<img src="${i.bookmakerLogoUrl}" class="h-4 max-w-[60px] object-contain group-hover:scale-105 transition-transform" alt="bookmaker" />` : ''}
+                                                <span class="text-[11px] font-black text-gray-700 group-hover:text-blue-600">${i.specificOdd}</span>
+                                                <svg class="w-3 h-3 text-gray-400 group-hover:text-blue-500 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                            </button>
+                                        ` : ''}
                                     </div>
                                     <p class="text-[10px] text-gray-500 italic">
-                                        In the last <b>${i.streakCount}</b> matches, <b>${marketName} ${fullPrediction}</b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
+                                        In the last <b>${i.streakCount}</b> matches, <b>${marketName} </b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
                                     </p>
                                 </div>
                             </div>
@@ -497,7 +652,6 @@ export function renderInsightsDashboard(insights) {
         }).join('')}
             </div>
 
-            <!-- Pagination Controls -->
             ${totalPages > 1 ? `
                 <div class="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 mt-6 shadow-sm">
                     <button id="btn-prev-page" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-[11px] uppercase tracking-wider rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" ${currentPage === 1 ? 'disabled' : ''}>
@@ -513,6 +667,23 @@ export function renderInsightsDashboard(insights) {
             ` : ''}
         `;
 
+        // ==========================================
+        // ⭐ NEW: Bind the click event to the new odds buttons
+        // ==========================================
+        container.querySelectorAll('.odd-popup-trigger').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                // Prevent the click from bubbling up if you have other handlers
+                e.stopPropagation();
+
+                // Get the exact index from the paginated data
+                const idx = parseInt(btn.dataset.insightIndex);
+                const insightData = paginatedInsights[idx];
+
+                // Fire the modal function
+                openOddsModal(insightData);
+            });
+        });
+
         // Bind Market clicks
         container.querySelectorAll('.market-badge').forEach(badge => {
             badge.addEventListener('click', () => {
@@ -522,7 +693,7 @@ export function renderInsightsDashboard(insights) {
                 } else {
                     selectedMarkets.push(marketName);
                 }
-                currentPage = 1; // Reset to first page when filtering
+                currentPage = 1;
                 render();
             });
         });
@@ -531,22 +702,13 @@ export function renderInsightsDashboard(insights) {
         const showAllBtn = container.querySelector('#btn-show-all');
         if (showAllBtn) {
             showAllBtn.addEventListener('click', () => {
-                // 1. Reset local market state
                 selectedMarkets = [];
-                // 2. Reset global league state
                 if (typeof state.filterByLeague !== 'undefined') {
                     state.filterByLeague = null;
                     lastLeagueFilter = null;
                 }
-                // 3. Reset pagination
                 currentPage = 1;
-
-                // 4. Uncheck all UI checkboxes in the sidebar
-                document.querySelectorAll('.league-filter-chk').forEach(chk => {
-                    chk.checked = false;
-                });
-
-                // 5. Re-render UI
+                document.querySelectorAll('.league-filter-chk').forEach(chk => chk.checked = false);
                 render();
             });
         }
@@ -558,7 +720,7 @@ export function renderInsightsDashboard(insights) {
                 if (currentPage > 1) {
                     currentPage--;
                     render();
-                    container.scrollIntoView({ behavior: 'smooth', block: 'start' }); // Scroll back to top of container
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
             });
         }
@@ -569,7 +731,7 @@ export function renderInsightsDashboard(insights) {
                 if (currentPage < totalPages) {
                     currentPage++;
                     render();
-                    container.scrollIntoView({ behavior: 'smooth', block: 'start' }); // Scroll back to top of container
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
             });
         }
@@ -597,12 +759,11 @@ export function renderInsightsDashboard(insights) {
         });
     };
 
-    // Attach the render to the window object so the checkbox listener can trigger it
     window.refreshInsightsDashboard = render;
-
-    // Initial render
     render();
 }
+
+
 export async function handleStreakPopUp(homeData, awayData) {
     const container = document.getElementById('twoTeamtableViewContent');
 

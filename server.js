@@ -103,7 +103,7 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        runPipelines(newLeagues)
+        // runPipelines(newLeagues)
 
         // runOddsPipeline(newLeagues);
         // startStreakWorker(newLeagues);

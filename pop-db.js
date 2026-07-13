@@ -117,6 +117,10 @@ async function processLeague(leagueId, seasonYear) {
             headers: { 'x-apisports-key': API_KEY },
             params: { id: leagueId, season: seasonYear }
         });
+        console.log(
+            'LEAGUE API RESPONSE:',
+            JSON.stringify(leagueApiResponse.data, null, 2)
+        );
 
         const data = leagueApiResponse.data.response[0];
         if (!data) throw new Error("League or season data not found on the external API");
@@ -358,9 +362,26 @@ async function runPipelines(tasks) {
             try {
                 await processLeague(leagueId, seasonYear);
             } catch (error) {
-                // If it fails, the transaction rolls back, we log it, and move to the next item
                 console.error(`\n[!] Transaction Failed & Rolled Back for League ${leagueId}, Season ${seasonYear}.`);
-                console.error('Reason:', error.message);
+
+                if (error.response) {
+                    // API responded but with an error status
+                    console.error('API ERROR STATUS:', error.response.status);
+                    console.error('API ERROR DATA:', JSON.stringify(error.response.data, null, 2));
+                    console.error('API URL:', error.config?.url);
+                    console.error('API PARAMS:', error.config?.params);
+
+                } else if (error.request) {
+                    // Request sent but no response received (timeout, network, rate limit proxy issues)
+                    console.error('NO RESPONSE FROM API');
+                    console.error('REQUEST:', error.request);
+
+                } else {
+                    // Non axios error (Prisma, JS error, etc.)
+                    console.error('GENERAL ERROR:', error.message);
+                }
+
+                console.error(error.stack);
             }
         }
 

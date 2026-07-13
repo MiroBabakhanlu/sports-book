@@ -18,11 +18,6 @@ import {
     closeTableView
 } from "./render_stats.js";
 
-export const getOddForPrediction = (market, direction, val) => {
-    const searchStr = `${direction.toLowerCase()}-${val}`;
-    const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
-    return found ? found.odd : null;
-};
 export function getColorForValue(value, avgValue) {
     if (value === null || value === undefined || value === '-') {
         return 'text-gray-300';
@@ -60,26 +55,35 @@ export function calculateLeagueMarketCounts(insights) {
 
     return leagueMarketCounts;
 }
+// ⭐ Updated to return the whole object instead of just the odd number
+export const getOddForPrediction = (market, direction, val) => {
+    const searchStr = `${direction.toLowerCase()}-${val}`;
+    return market.odds?.find(o => o.selection.toLowerCase() === searchStr) || null;
+};
+
 export function prepareInsightsData(result) {
-    console.log('prepareInsightsData', result)
     const insights = [];
 
-    // --- Helper: Find the specific odd ---
-    const getOddForPrediction = (market, direction, val) => {
-        const searchStr = `${direction.toLowerCase()}-${val}`;
-        const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
-        return found ? found.odd : null;
-    };
-
-    // 1. Flatten Data
     result.data.forEach(match => {
         const homeOddObj = match.matchWinnerOdds?.find(o => o.selection === 'home');
         const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
 
         match.marketData.forEach(m => {
+            // ⭐ 1. Grab ALL available odds for this market on this match
+            const allMarketOdds = m.odds || [];
+
+            // Helper just to find the best odd to display on the main dashboard card
+            const getBestOdd = (market, direction, val) => {
+                const searchStr = `${direction.toLowerCase()}-${val}`;
+                const matches = market.odds?.filter(o => o.selection.toLowerCase() === searchStr) || [];
+                matches.sort((a, b) => Number(b.odd) - Number(a.odd));
+                return matches[0] || null;
+            };
+
+            // HOME STREAK
             if (m.home?.streak?.length >= 3) {
-                const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
-                const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
+                const direction = m.home.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                const bestOdd = getBestOdd(m, direction, m.home.suggestedValue);
 
                 insights.push({
                     match, isHome: true, market: m,
@@ -88,12 +92,16 @@ export function prepareInsightsData(result) {
                     suggestedValue: m.home.suggestedValue,
                     avgValue: m.home.avg_value,
                     direction,
-                    specificOdd
+                    specificOdd: bestOdd ? bestOdd.odd : null,
+                    bookmakerLogoUrl: bestOdd?.bookmaker?.logo_url || null,
+                    allMarketOdds: allMarketOdds // ⭐ Save ALL market odds for the popup
                 });
             }
+
+            // AWAY STREAK
             if (m.away?.streak?.length >= 3) {
-                const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
-                const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
+                const direction = m.away.streak.direction == 'below' ? 'OVER' : 'UNDER';
+                const bestOdd = getBestOdd(m, direction, m.away.suggestedValue);
 
                 insights.push({
                     match, isHome: false, market: m,
@@ -102,14 +110,14 @@ export function prepareInsightsData(result) {
                     suggestedValue: m.away.suggestedValue,
                     avgValue: m.away.avg_value,
                     direction,
-                    specificOdd
+                    specificOdd: bestOdd ? bestOdd.odd : null,
+                    bookmakerLogoUrl: bestOdd?.bookmaker?.logo_url || null,
+                    allMarketOdds: allMarketOdds // ⭐ Save ALL market odds for the popup
                 });
             }
         });
     });
 
-    // 2. Sort by Streak
     insights.sort((a, b) => b.streakCount - a.streakCount);
-
     return insights;
 }

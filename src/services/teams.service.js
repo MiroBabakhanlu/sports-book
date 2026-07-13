@@ -1,17 +1,21 @@
 const AppError = require("../middlewares/errorMiddleware");
 const { prisma } = require("../utils/prisma");
-
+const fs = require('fs');
+const path = require('path');
 
 const SLUG_MAP = {
     'corners-over-under': 'total-corner-kicks',
     'goals-overunder': 'total-goals',
     'red-cards-over-under': 'total-red-cards',
     'yellow-cards-over-under': 'total-yellow-cards',
-    'team-goals': 'team-goals',
-    'team-corner-kicks': 'team-corner-kicks',
+    'total-home': 'team-goals',
+    'total-away': 'team-goals',
+    'home-corners-overunder': 'team-corner-kicks',
+    'away-corners-overunder': 'team-corner-kicks',
     'team-yellow-cards': 'team-yellow-cards',
     'team-red-cards': 'team-red-cards'
 };
+
 const STREAK_CHECK_SLUGS = [
     'team-goals',
     'total-goals',
@@ -234,13 +238,21 @@ const teamsServices = {
     getUpcomingMatches: async ({ leagueIds, teamId, seasonYear }) => {
         const now = new Date();
 
-        const targetBookmaker = await prisma.bookmaker.findFirst({
-            where: { name: 'Bet365' }
-        });
-        if (!targetBookmaker) {
-            throw new AppError('could not find that given bookmaker name', 400);
+        // ─── NEW: READ MEDIA DIRECTORY UPFRONT FOR BOOKMAKER LOGOS ─────────
+        let logoMap = new Map();
+        try {
+            const mediaPath = path.join(__dirname, '../.././public/media');
+            const mediaFiles = fs.readdirSync(mediaPath);
+
+            // Build a lowercase lookup map: { 'bet365': '../media/bet365.png' }
+            mediaFiles.forEach(file => {
+                const fileName = path.parse(file).name.toLowerCase();
+                logoMap.set(fileName, `../media/${file}`);
+            });
+        } catch (error) {
+            console.error("⚠️ Error reading bookmaker media directory:", error);
         }
-        const targetBookmakerId = targetBookmaker.id;
+        // ───────────────────────────────────────────────────────────────────
 
         const matchWhereClause = {
             status: { in: ['NS', 'PST'] },
@@ -250,7 +262,6 @@ const teamsServices = {
             }
         };
 
-        // Use Prisma's "in" operator to query multiple leagues at once
         if (leagueIds && leagueIds.length > 0) {
             matchWhereClause.season.league_id = { in: leagueIds };
         }
@@ -274,13 +285,13 @@ const teamsServices = {
                 },
                 matchOdds: {
                     where: {
-                        bookmaker_id: targetBookmakerId,
                         market: { slug: { in: [...Object.keys(SLUG_MAP), 'match-winner'] } }
                     },
                     select: {
                         market: { select: { slug: true } },
                         slug: true,
-                        odd: true
+                        odd: true,
+                        bookmaker: { select: { id: true, name: true } }
                     }
                 }
             },
@@ -308,9 +319,6 @@ const teamsServices = {
         });
         const streakMarketIds = allMarkets.map(m => m.id);
 
-        // -----------------------------------------------------------------
-        // MASSIVE OPTIMIZATION: BATCH FETCH ALL AVERAGES & STREAKS UPFRONT
-        // -----------------------------------------------------------------
         const uniqueTeamIds = [...new Set(validMatches.flatMap(m => [m.home_team_id, m.away_team_id]))];
         const uniqueSeasonIds = [...new Set(validMatches.map(m => m.season_id))];
 
@@ -331,7 +339,6 @@ const teamsServices = {
             })
         ]);
 
-        // Construct highly performant lookup maps out of database rows
         const averageMap = new Map();
         allAverages.forEach(avg => {
             averageMap.set(`${avg.team_id}-${avg.market_id}-${avg.season_id}`, avg);
@@ -341,13 +348,11 @@ const teamsServices = {
         allStreaks.forEach(str => {
             streakMap.set(`${str.team_id}-${str.market_id}-${str.season_id}`, str);
         });
-        // -----------------------------------------------------------------
 
         const result = validMatches.map((match) => {
             const hasOddsRecords = match.matchOdds.length > 0;
 
             if (!hasOddsRecords) {
-                // Memory check fallback step instead of hitting database again
                 const matchHasHighStreak = allStreaks.some(str =>
                     str.season_id === match.season_id &&
                     [match.home_team_id, match.away_team_id].includes(str.team_id) &&
@@ -360,7 +365,18 @@ const teamsServices = {
             match.matchOdds.forEach(o => {
                 const slug = o.market.slug;
                 if (!oddsByMarket[slug]) oddsByMarket[slug] = [];
+
+                // ─── NEW: LOOKUP THE LOGO URL FROM OUR IN-MEMORY MAP ───────────
+                const bookmakerName = o.bookmaker?.name || '';
+                const logoUrl = logoMap.get(bookmakerName.toLowerCase()) || null;
+                // ───────────────────────────────────────────────────────────────
+
                 oddsByMarket[slug].push({
+                    bookmaker: {
+                        id: o.bookmaker?.id,
+                        name: bookmakerName,
+                        logo_url: logoUrl // ⭐ Logo added here
+                    },
                     selection: o.slug,
                     odd: Number(o.odd)
                 });
@@ -372,7 +388,6 @@ const teamsServices = {
                 const marketRecord = allMarkets.find(m => m.slug === canonicalSlug);
                 if (!marketRecord) continue;
 
-                // Synchronous lookup function pulling items from memory maps
                 const getTeamDataFromMemory = (teamId) => {
                     const mapKey = `${teamId}-${marketRecord.id}-${match.season_id}`;
                     const avg = averageMap.get(mapKey);
