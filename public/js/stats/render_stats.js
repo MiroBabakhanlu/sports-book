@@ -750,6 +750,7 @@ export function renderInsightsDashboard(insights) {
                                     </div>
                                     <p class="text-[10px] text-gray-500 italic">
                                         In the last <b>${i.streakCount}</b> matches, <b>${marketName} </b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
+                                        ${i.confidence != null ? `<span class="not-italic font-bold text-blue-600 ml-1">Confidence: ${Number(i.confidence).toFixed(0)}%</span>` : ''}
                                     </p>
                                 </div>
                             </div>

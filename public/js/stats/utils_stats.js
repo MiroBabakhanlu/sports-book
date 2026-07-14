@@ -102,6 +102,7 @@ export function prepareInsightsData(result) {
                     homeOddLogo: homeOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
                     awayOddLogo: awayOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
                     streakCount: m.home.streak.length,
+                    confidence: m.home.streak.confidence ?? null,
                     suggestedValue: m.home.suggestedValue,
                     avgValue: m.home.avg_value,
                     direction,
@@ -121,7 +122,8 @@ export function prepareInsightsData(result) {
                     homeOdd: homeOddObj?.odd || '—', awayOdd: awayOddObj?.odd || '—',
                     matchWinnerOdds: match.matchWinnerOdds || [],
                     homeOddLogo: homeOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
-                    awayOddLogo: awayOddObj?.bookmaker?.logo_url || null,   // ⭐ NEW
+                    awayOddLogo: awayOddObj?.bookmaker?.logo_url || null,
+                    confidence: m.away.streak.confidence ?? null,  // ⭐ NEW
                     streakCount: m.away.streak.length,
                     suggestedValue: m.away.suggestedValue,
                     avgValue: m.away.avg_value,

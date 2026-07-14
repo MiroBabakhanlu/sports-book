@@ -399,7 +399,8 @@ const teamsServices = {
                         suggestedValue: (val % 1 === 0) ? val : Math.floor(val) + 0.5,
                         streak: streak ? {
                             length: streak.streak_length,
-                            direction: streak.streak_direction
+                            direction: streak.streak_direction,
+                            confidence: streak.confidence != null ? Number(streak.confidence) : null  // ⭐ NEW
                         } : null
                     };
                 };

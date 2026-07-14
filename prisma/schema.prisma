@@ -219,9 +219,9 @@ model TeamStreak {
   market_id        Int
   streak_length    Int
   streak_direction String
+  confidence       Decimal? // ⭐ Streak Strength Score, 0–100
   recalculated_at  DateTime @updatedAt
 
-  // Relations
   team   Team   @relation(fields: [team_id], references: [id])
   season Season @relation(fields: [season_id], references: [id])
   market Market @relation(fields: [market_id], references: [id])

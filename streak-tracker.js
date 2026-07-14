@@ -7,6 +7,24 @@ const TARGET_SLUGS = [
     'team-corner-kicks', 'total-corner-kicks'
 ];
 
+// IF avg is a whole number:
+//     return avg
+// ─── Streak Strength Score helpers ──────────────────────────────
+function suggestedThreshold(avg) {
+    return (avg % 1 === 0) ? avg : Math.floor(avg) + 0.5;
+}
+
+function calcStreakConfidence(n, avg, threshold) {
+    if (!n || n <= 0 || !threshold || threshold <= 0) return 0;
+
+    const S = 1 - Math.exp(-n / 5);                                   // streak-length score
+    const A = Math.max(0, 1 - Math.abs(threshold - avg) / threshold); // average-closeness score
+    const C = 100 * Math.pow(S, 0.6) * Math.pow(A, 0.4);              // C = 100 * S^0.6 * A^0.4
+
+    return Math.round(C * 100) / 100; // 2 decimals
+}
+// ────────────────────────────────────────────────────────────────
+
 async function calculateLeagueStreaks(leagueId, seasonYear) {
     try {
         console.log(`\n📊 [Streak Worker] Starting for League: ${leagueId}, Season: ${seasonYear}`);
@@ -79,6 +97,10 @@ async function calculateLeagueStreaks(leagueId, seasonYear) {
                     }
                 }
 
+                // ─── Compute Streak Strength Score ───
+                const threshold = suggestedThreshold(averageValue);
+                const confidence = calcStreakConfidence(currentStreak, averageValue, threshold);
+
                 // Save or Update streak
                 await prisma.teamStreak.upsert({
                     where: {
@@ -90,14 +112,16 @@ async function calculateLeagueStreaks(leagueId, seasonYear) {
                     },
                     update: {
                         streak_length: currentStreak,
-                        streak_direction: streakDirection
+                        streak_direction: streakDirection,
+                        confidence
                     },
                     create: {
                         team_id: teamId,
                         season_id: season.id,
                         market_id: avg.market_id,
                         streak_length: currentStreak,
-                        streak_direction: streakDirection
+                        streak_direction: streakDirection,
+                        confidence
                     }
                 });
                 upsertCount++;
