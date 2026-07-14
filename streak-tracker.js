@@ -21,7 +21,7 @@ function calcStreakConfidence(n, avg, threshold) {
     const A = Math.max(0, 1 - Math.abs(threshold - avg) / threshold); // average-closeness score
     const C = 100 * Math.pow(S, 0.6) * Math.pow(A, 0.4);              // C = 100 * S^0.6 * A^0.4
 
-    return Math.round(C * 100) / 100; // 2 decimals
+    return C; // exact, unrounded value
 }
 // ────────────────────────────────────────────────────────────────
 

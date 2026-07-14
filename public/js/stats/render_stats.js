@@ -45,9 +45,9 @@ export function renderTeamDashboard(data, teamId, teamName) {
         TeamAvgsContainer.innerHTML = `<p class="text-xs text-gray-400 italic p-2">No summary metrics computed.</p>`;
     } else {
         TeamAvgsContainer.innerHTML = averages.map(avg => {
-            const val = avg.avg_value !== null ? Number(avg.avg_value).toFixed(2) : '-';
-            const hVal = avg.avg_value_home !== null ? Number(avg.avg_value_home).toFixed(2) : '-';
-            const aVal = avg.avg_value_away !== null ? Number(avg.avg_value_away).toFixed(2) : '-';
+            const val = avg.avg_value !== null ? Number(avg.avg_value).toFixed(3) : '-';
+            const hVal = avg.avg_value_home !== null ? Number(avg.avg_value_home).toFixed(3) : '-';
+            const aVal = avg.avg_value_away !== null ? Number(avg.avg_value_away).toFixed(3) : '-';
 
             const totalVal = avg.total_sum !== null && avg.total_sum !== undefined ? Math.round(avg.total_sum) : '-';
             const totalHVal = avg.total_sum_home !== null && avg.total_sum_home !== undefined ? Math.round(avg.total_sum_home) : '-';
@@ -749,8 +749,8 @@ export function renderInsightsDashboard(insights) {
                                         ` : ''}
                                     </div>
                                     <p class="text-[10px] text-gray-500 italic">
-                                        In the last <b>${i.streakCount}</b> matches, <b>${marketName} </b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(2)}</b>.
-                                        ${i.confidence != null ? `<span class="not-italic font-bold text-blue-600 ml-1">Confidence: ${Number(i.confidence).toFixed(0)}%</span>` : ''}
+                                        In the last <b>${i.streakCount}</b> matches, <b>${marketName} </b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(3)}</b>.
+                                        ${i.confidence != null ? `<span class="not-italic font-bold text-blue-600 ml-1">Confidence: ${Number(i.confidence).toFixed(3)}%</span>` : ''}
                                     </p>
                                 </div>
                             </div>
@@ -986,7 +986,7 @@ export function renderMarketComparisonTable(teamA, teamB) {
             return `
                 <tr>
                     <td class="border px-2 py-1 font-semibold sticky left-0 bg-white">${team.teamName}</td>
-                    <td class="border px-2 py-1 text-center">${teamAvg ? Number(teamAvg.avg_value).toFixed(2) : 'N/A'}</td>
+                    <td class="border px-2 py-1 text-center">${teamAvg ? Number(teamAvg.avg_value).toFixed(3) : 'N/A'}</td>
                     <td class="border px-2 py-1 text-center text-600 font-bold">${teamAvg?.streak?.length || 0}</td>
                     ${mdValues}
                 </tr>
@@ -1099,7 +1099,7 @@ export function openTableView() {
 
     state.currentAveragesData.forEach((avg, index) => {
         const slug = avg.market.slug.toLowerCase();
-        const val = avg.avg_value !== null ? Number(avg.avg_value).toFixed(2) : '-';
+        const val = avg.avg_value !== null ? Number(avg.avg_value).toFixed(3) : '-';
         const totalVal = avg.total_sum !== null && avg.total_sum !== undefined ? Math.round(avg.total_sum) : '-';
         const avgValue = avg.avg_value || 0;
         const streakVal = avg.streak?.length ?? 'nc';
