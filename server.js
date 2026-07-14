@@ -71,12 +71,13 @@ const activeLeagues = [
 const newLeagues = [
     // [98, 2026] //
     // [106, 2026] //
-    [103, 2026], //good
-    [479, 2026], //good
-    [113, 2026], //good
-    [361, 2026], //good
-    [364, 2026], // good
+    // [103, 2026], //good
+    // [479, 2026], //good
+    // [113, 2026], //good
+    // [361, 2026], //good
+    // [364, 2026], // good
     // [487, 2026] 
+    // [253, 2026]
 ]
 
 
@@ -103,10 +104,10 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        // runPipelines(newLeagues)
+        runPipelines(targetLeagues)
 
-        // runOddsPipeline(newLeagues);
-        // startStreakWorker(newLeagues);
+        // runOddsPipeline(activeLeagues);
+        // startStreakWorker(activeLeagues);
 
         // require('./update-db');
     } catch (err) {

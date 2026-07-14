@@ -84,7 +84,7 @@ async function syncTargetedOdds(targetLeagues) {
 
                 const response = await axios.get('https://v3.football.api-sports.io/odds', {
                     params: { league: task.leagueApiId, season: task.seasonYear, page: currentPage },
-                    headers: { 'x-apisports-key': 'be6628089266c3f9779a94c9744b1dcf' }
+                    headers: { 'x-apisports-key': '6dea7d814258faa2db4f3051b6cfc065' }
                 });
 
                 totalPages = response.data?.paging?.total || 1;

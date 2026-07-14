@@ -1,7 +1,7 @@
 const { prisma, connectDB } = require('./src/utils/prisma');
 const axios = require('axios');
 
-const API_KEY = 'be6628089266c3f9779a94c9744b1dcf';
+const API_KEY = '6dea7d814258faa2db4f3051b6cfc065';
 const BASE_URL = 'https://v3.football.api-sports.io';
 
 function chunkArray(array, size) {
@@ -29,7 +29,13 @@ async function upsertMatchStat(tx, matchId, teamId, marketId, value, side) {
                 market_id: marketId
             }
         },
-        update: { value: value },
+        update: {
+            match_id: matchId,
+            team_id: teamId,
+            market_id: marketId,
+            value: value,
+            side: side
+        },
         create: {
             match_id: matchId,
             team_id: teamId,
@@ -138,8 +144,12 @@ async function processLeague(leagueId, seasonYear) {
         const dbLeague = await tx.league.upsert({
             where: { id_api: String(league.id) },
             update: {
+                sport_id: sport.id,
+                name: league.name,
+                country: country.name,
+                id_api: String(league.id),
                 slug: leagueSlug,
-                country: country.name
+                is_active: true
             },
             create: {
                 sport_id: sport.id,
@@ -160,7 +170,10 @@ async function processLeague(leagueId, seasonYear) {
                 }
             },
             update: {
+                league_id: dbLeague.id,
+                year: String(currentSeason.year),
                 is_current: currentSeason.current,
+                id_api: String(currentSeason.year),
                 start_date: new Date(currentSeason.start),
                 end_date: new Date(currentSeason.end)
             },
@@ -186,7 +199,14 @@ async function processLeague(leagueId, seasonYear) {
         for (const t of teams) {
             await tx.team.upsert({
                 where: { id_api: String(t.team.id) },
-                update: { logo_url: t.team.logo },
+                update: {
+                    sport_id: sport.id,
+                    name: t.team.name,
+                    id_api: String(t.team.id),
+                    logo_url: t.team.logo,
+                    country: t.team.country,
+                    is_active: true
+                },
                 create: {
                     sport_id: sport.id,
                     name: t.team.name,
@@ -266,9 +286,16 @@ async function processLeague(leagueId, seasonYear) {
                 const match = await tx.match.upsert({
                     where: { id_api: apiMatchId },
                     update: {
+                        id_api: apiMatchId,
+                        season_id: dbSeason.id,
+                        home_team_id: homeTeam.id,
+                        away_team_id: awayTeam.id,
+                        matchday: extractMatchday(f.league.round),
+                        kickoff_at: new Date(f.fixture.date),
+                        status: f.fixture.status.short,
                         home_score: f.goals.home,
                         away_score: f.goals.away,
-                        status: f.fixture.status.short,
+                        venue: f.fixture.venue.name,
                         winner_team_id: winnerTeamId
                     },
                     create: {
