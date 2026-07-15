@@ -351,7 +351,7 @@ export function renderInsightsDashboard(insights) {
         return true;
     });
 
-
+    // Collapses team home/away odds slugs into one canonical UI label.
     const MARKET_DISPLAY = {
         'total-home': 'TEAM GOALS',
         'total-away': 'TEAM GOALS',
@@ -369,6 +369,9 @@ export function renderInsightsDashboard(insights) {
         MARKET_DISPLAY[(slug || '').toLowerCase()] ||
         (slug || '').replace(/-/g, ' ').toUpperCase();
 
+    // ⭐ NEW: any merged team label starts with "TEAM"
+    const isTeamMarket = (label) => (label || '').startsWith('TEAM');
+
     const container = document.getElementById('upcoming-matches-container');
     container.innerHTML = `<div class="p-8 text-center text-gray-400"><div class="animate-pulse">Loading analysis...</div></div>`;
 
@@ -382,6 +385,7 @@ export function renderInsightsDashboard(insights) {
 
     // State for selected filters and pagination
     let selectedMarkets = [];
+    let selectedSide = null;   // ⭐ NEW: 'home' | 'away' | null
     let sortBy = 'confidence-desc';
     let currentPage = 1;
     const itemsPerPage = 10;
@@ -648,12 +652,30 @@ export function renderInsightsDashboard(insights) {
             }
         });
 
+        // ⭐ NEW: home/away counts for the selected TEAM market(s)
+        const hasTeamSelected = selectedMarkets.some(isTeamMarket);
+        const sideCounts = { home: 0, away: 0 };
+
+        if (hasTeamSelected) {
+            insights.forEach(i => {
+                const leagueId = i.match.league_id || i.match.league?.id;
+                const leagueOk = typeof state.filterByLeague === 'undefined' || state.filterByLeague === null || state.filterByLeague === leagueId;
+                const marketName = getMarketLabel(i.market.marketSlug);
+                if (leagueOk && selectedMarkets.includes(marketName) && isTeamMarket(marketName)) {
+                    if (i.isHome) sideCounts.home++; else sideCounts.away++;
+                }
+            });
+        }
+
         const filteredInsights = insights.filter(i => {
             const marketName = getMarketLabel(i.market.marketSlug)
             const leagueId = i.match.league_id || i.match.league?.id;
             const matchesMarket = selectedMarkets.length === 0 || selectedMarkets.includes(marketName);
             const matchesLeague = typeof state.filterByLeague === 'undefined' || state.filterByLeague === null || state.filterByLeague === leagueId;
-            return matchesMarket && matchesLeague;
+            // ⭐ NEW: side only affects team markets
+            const matchesSide = !selectedSide || !isTeamMarket(marketName) ||
+                (selectedSide === 'home' ? i.isHome : !i.isHome);
+            return matchesMarket && matchesLeague && matchesSide;
         });
         filteredInsights.sort((a, b) => {
             switch (sortBy) {
@@ -674,7 +696,7 @@ export function renderInsightsDashboard(insights) {
         const endIndex = startIndex + itemsPerPage;
         const paginatedInsights = filteredInsights.slice(startIndex, endIndex);
 
-        const isAnyFilterActive = selectedMarkets.length > 0 || (typeof state.filterByLeague !== 'undefined' && state.filterByLeague !== null);
+        const isAnyFilterActive = selectedMarkets.length > 0 || selectedSide !== null || (typeof state.filterByLeague !== 'undefined' && state.filterByLeague !== null);
         state.globalInsightVariable = insights;
 
         const summaryHtml = `
@@ -700,6 +722,30 @@ export function renderInsightsDashboard(insights) {
         }).join('')}
                     </div>
                 </div>
+
+                ${hasTeamSelected ? `
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">Side:</span>
+                        <div class="flex flex-wrap gap-2 flex-grow">
+                            ${['home', 'away'].map(side => {
+            const count = sideCounts[side];
+            const isSelected = selectedSide === side;
+            const badgeClass = isSelected
+                ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                : count === 0
+                    ? 'bg-white border-gray-100 text-gray-300 opacity-40 pointer-events-none'
+                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100';
+            const countClass = isSelected ? 'bg-white text-blue-600' : 'bg-blue-600 text-white';
+            return `
+                                    <div data-side="${side}" class="side-badge border rounded-full px-3 py-1 flex items-center gap-2 text-[10px] font-black cursor-pointer select-none transition-all ${badgeClass}">
+                                        <span>${side.toUpperCase()}</span>
+                                        <span class="${countClass} px-1.5 py-0.5 rounded-full text-[9px]">${count}</span>
+                                    </div>
+                                `;
+        }).join('')}
+                        </div>
+                    </div>
+                ` : ''}
 
                 ${isAnyFilterActive ? `
                     <button id="btn-show-all" class="absolute top-4 right-4 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold text-[10px] px-3 py-1 rounded-full shadow-sm transition-all uppercase tracking-wider">
@@ -741,6 +787,7 @@ export function renderInsightsDashboard(insights) {
                                     <div class="flex flex-col items-center w-1/3 mt-2">
                                         <img src="${i.match.homeTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
                                         <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.homeTeam.name}</div>
+                                        <div class="text-[8px] font-black uppercase tracking-wider ${i.isHome ? 'text-blue-600' : 'text-black-300'}">HOME</div>
                                 ${(i.matchWinnerOdds && i.matchWinnerOdds.length)
                     ? `<button data-insight-index="${index}" data-mw-selection="home"
                                                     class="mw-odd-trigger mt-1 flex items-center gap-1 ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded hover:ring-2 hover:ring-blue-400 transition-all cursor-pointer">
@@ -763,6 +810,8 @@ export function renderInsightsDashboard(insights) {
                                     <div class="flex flex-col items-center w-1/3 mt-2">
                                         <img src="${i.match.awayTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
                                         <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.awayTeam.name}</div>
+                                        <div class="text-[8px] font-black uppercase tracking-wider ${!i.isHome ? 'text-blue-600' : 'text-gray-300'}">AWAY</div>
+
                                    ${(i.matchWinnerOdds && i.matchWinnerOdds.length)
                     ? `<button data-insight-index="${index}" data-mw-selection="away"
                                             class="mw-odd-trigger mt-1 flex items-center gap-1 ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded hover:ring-2 hover:ring-blue-400 transition-all cursor-pointer">
@@ -839,6 +888,18 @@ export function renderInsightsDashboard(insights) {
                 } else {
                     selectedMarkets.push(marketName);
                 }
+                // ⭐ NEW: drop stale side filter when no team market remains selected
+                if (!selectedMarkets.some(isTeamMarket)) selectedSide = null;
+                currentPage = 1;
+                render();
+            });
+        });
+
+        // ⭐ NEW: Bind Side clicks
+        container.querySelectorAll('.side-badge').forEach(badge => {
+            badge.addEventListener('click', () => {
+                const side = badge.dataset.side;
+                selectedSide = selectedSide === side ? null : side; // toggle off if re-clicked
                 currentPage = 1;
                 render();
             });
@@ -849,6 +910,7 @@ export function renderInsightsDashboard(insights) {
         if (showAllBtn) {
             showAllBtn.addEventListener('click', () => {
                 selectedMarkets = [];
+                selectedSide = null;   // ⭐ NEW
                 if (typeof state.filterByLeague !== 'undefined') {
                     state.filterByLeague = null;
                     lastLeagueFilter = null;
@@ -928,7 +990,6 @@ export function renderInsightsDashboard(insights) {
     window.refreshInsightsDashboard = render;
     render();
 }
-
 
 export async function handleStreakPopUp(homeData, awayData) {
     const container = document.getElementById('twoTeamtableViewContent');
