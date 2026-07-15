@@ -223,7 +223,11 @@ async function processLeague(leagueId, seasonYear) {
             'team-goals', 'total-goals',
             'team-yellow-cards', 'total-yellow-cards',
             'team-red-cards', 'total-red-cards',
-            'team-corner-kicks', 'total-corner-kicks'
+            'team-corner-kicks', 'total-corner-kicks',
+            // conceded
+            // 'team-goals-conceded',
+            // 'team-corner-kicks-conceded',
+            // 'team-yellow-cards-conceded'
         ];
 
         const dbMarkets = await tx.market.findMany({
@@ -369,6 +373,19 @@ async function processLeague(leagueId, seasonYear) {
                         await upsertMatchStat(tx, match.id, homeTeam.id, market.id, finalValue, 'home');
                         await upsertMatchStat(tx, match.id, awayTeam.id, market.id, finalValue, 'away');
                     }
+                    // else if (market.slug === 'team-goals-conceded') {
+                    //     // home CONCEDED = what away scored; away CONCEDED = what home scored
+                    //     await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayGoals, 'home');
+                    //     await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeGoals, 'away');
+                    // }
+                    // else if (market.slug === 'team-corner-kicks-conceded') {
+                    //     await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayCorners, 'home');
+                    //     await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeCorners, 'away');
+                    // }
+                    // else if (market.slug === 'team-yellow-cards-conceded') {
+                    //     await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayYellows, 'home');
+                    //     await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeYellows, 'away');
+                    // }
                 }
             }
         }

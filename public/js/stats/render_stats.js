@@ -364,6 +364,7 @@ export function renderInsightsDashboard(insights) {
 
     // State for selected filters and pagination
     let selectedMarkets = [];
+    let sortBy = 'confidence-desc';
     let currentPage = 1;
     const itemsPerPage = 10;
     let lastLeagueFilter = typeof state.filterByLeague !== 'undefined' ? state.filterByLeague : null;
@@ -636,6 +637,16 @@ export function renderInsightsDashboard(insights) {
             const matchesLeague = typeof state.filterByLeague === 'undefined' || state.filterByLeague === null || state.filterByLeague === leagueId;
             return matchesMarket && matchesLeague;
         });
+        filteredInsights.sort((a, b) => {
+            switch (sortBy) {
+                case 'confidence-desc': return (b.confidence ?? 0) - (a.confidence ?? 0);
+                case 'confidence-asc': return (a.confidence ?? 0) - (b.confidence ?? 0);
+                case 'streak-desc': return (b.streakCount ?? 0) - (a.streakCount ?? 0);
+                case 'streak-asc': return (a.streakCount ?? 0) - (b.streakCount ?? 0);
+                default: return 0;
+            }
+        });
+
 
         const totalItems = filteredInsights.length;
         const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
@@ -677,6 +688,16 @@ export function renderInsightsDashboard(insights) {
                         Show All
                     </button>
                 ` : ''}
+
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">Sort by:</span>
+                    <select id="sort-select" class="text-[11px] font-bold text-gray-700 bg-white border border-gray-200 rounded-full px-3 py-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400">
+                        <option value="confidence-desc" ${sortBy === 'confidence-desc' ? 'selected' : ''}>Confidence (high → low)</option>
+                        <option value="confidence-asc"  ${sortBy === 'confidence-asc' ? 'selected' : ''}>Confidence (low → high)</option>
+                        <option value="streak-desc"     ${sortBy === 'streak-desc' ? 'selected' : ''}>Streak length (long → short)</option>
+                        <option value="streak-asc"      ${sortBy === 'streak-asc' ? 'selected' : ''}>Streak length (short → long)</option>
+                    </select>
+                </div>
             </div>
         `;
 
@@ -873,7 +894,17 @@ export function renderInsightsDashboard(insights) {
                 openMatchWinnerModal(insightData, btn.dataset.mwSelection);
             });
         });
+
+        const sortSelect = container.querySelector('#sort-select');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', (e) => {
+                sortBy = e.target.value;
+                currentPage = 1;   // reset to first page after re-sorting
+                render();
+            });
+        }
     };
+
 
 
     window.refreshInsightsDashboard = render;

@@ -4,7 +4,11 @@ const TARGET_SLUGS = [
     'team-goals', 'total-goals',
     'team-yellow-cards', 'total-yellow-cards',
     'team-red-cards', 'total-red-cards',
-    'team-corner-kicks', 'total-corner-kicks'
+    'team-corner-kicks', 'total-corner-kicks',
+    // conceded
+    // 'team-goals-conceded',
+    // 'team-corner-kicks-conceded',
+    // 'team-yellow-cards-conceded'
 ];
 
 // IF avg is a whole number:

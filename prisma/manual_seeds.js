@@ -29,7 +29,12 @@ async function main() {
 
         // Corner Kicks
         { name: 'Team Corner Kicks', slug: 'team-corner-kicks', scope: 'team', description: 'Total corner kicks taken by a specific team' },
-        { name: 'Total Corner Kicks', slug: 'total-corner-kicks', scope: 'team', description: 'Combined corner kicks taken by both teams in the match' }
+        { name: 'Total Corner Kicks', slug: 'total-corner-kicks', scope: 'team', description: 'Combined corner kicks taken by both teams in the match' },
+
+        // Conceded (opponent-perspective) markets
+        // { name: 'Team Goals Conceded', slug: 'team-goals-conceded', scope: 'team', description: 'Goals conceded by a specific team (what opponents scored against them)' },
+        // { name: 'Team Corner Kicks Conceded', slug: 'team-corner-kicks-conceded', scope: 'team', description: 'Corner kicks conceded by a specific team (corners opponents took against them)' },
+        // { name: 'Team Yellow Cards Conceded', slug: 'team-yellow-cards-conceded', scope: 'team', description: 'Yellow cards the opponent received (opponent aggression against this team)' }
     ];
 
     for (const market of coreMarkets) {
