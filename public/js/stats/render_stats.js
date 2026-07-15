@@ -351,6 +351,24 @@ export function renderInsightsDashboard(insights) {
         return true;
     });
 
+
+    const MARKET_DISPLAY = {
+        'total-home': 'TEAM GOALS',
+        'total-away': 'TEAM GOALS',
+        'home-corners-overunder': 'TEAM CORNERS',
+        'away-corners-overunder': 'TEAM CORNERS',
+        'corners-over-under': 'CORNERS OVER UNDER',
+        'goals-overunder': 'GOALS OVER UNDER',
+        'red-cards-over-under': 'RED CARDS OVER UNDER',
+        'yellow-cards-over-under': 'YELLOW CARDS OVER UNDER',
+        'team-yellow-cards': 'TEAM YELLOW CARDS',
+        'team-red-cards': 'TEAM RED CARDS',
+    };
+
+    const getMarketLabel = (slug) =>
+        MARKET_DISPLAY[(slug || '').toLowerCase()] ||
+        (slug || '').replace(/-/g, ' ').toUpperCase();
+
     const container = document.getElementById('upcoming-matches-container');
     container.innerHTML = `<div class="p-8 text-center text-gray-400"><div class="animate-pulse">Loading analysis...</div></div>`;
 
@@ -360,7 +378,7 @@ export function renderInsightsDashboard(insights) {
     }
 
     // 3. Get master unique lists for markets
-    const allMarkets = [...new Set(insights.map(i => i.market.marketSlug.replace(/-/g, ' ').toUpperCase()))].sort();
+    const allMarkets = [...new Set(insights.map(i => getMarketLabel(i.market.marketSlug)))].sort();
 
     // State for selected filters and pagination
     let selectedMarkets = [];
@@ -374,7 +392,7 @@ export function renderInsightsDashboard(insights) {
     // ==========================================
     const openOddsModal = (insight) => {
         const teamName = insight.isHome ? insight.match.homeTeam.name : insight.match.awayTeam.name;
-        const marketName = insight.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+        const marketName = getMarketLabel(insight.market.marketSlug)
 
         // Get ALL odds (not filtered)
         const allOdds = insight.market.odds || [];
@@ -625,13 +643,13 @@ export function renderInsightsDashboard(insights) {
         insights.forEach(i => {
             const leagueId = i.match.league_id || i.match.league?.id;
             if (typeof state.filterByLeague === 'undefined' || state.filterByLeague === null || state.filterByLeague === leagueId) {
-                const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+                const marketName = getMarketLabel(i.market.marketSlug)
                 marketCounts[marketName]++;
             }
         });
 
         const filteredInsights = insights.filter(i => {
-            const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+            const marketName = getMarketLabel(i.market.marketSlug)
             const leagueId = i.match.league_id || i.match.league?.id;
             const matchesMarket = selectedMarkets.length === 0 || selectedMarkets.includes(marketName);
             const matchesLeague = typeof state.filterByLeague === 'undefined' || state.filterByLeague === null || state.filterByLeague === leagueId;
@@ -709,7 +727,7 @@ export function renderInsightsDashboard(insights) {
                 ${paginatedInsights.length === 0 ? `
                     <div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 italic">No matches match the selected criteria.</div>
                 ` : paginatedInsights.map((i, index) => {
-            const marketName = i.market.marketSlug.replace(/-/g, ' ').toUpperCase();
+            const marketName = getMarketLabel(i.market.marketSlug)
             const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
             const fullPrediction = `${i.direction} ${i.suggestedValue}`;
             const leagueLabel = i.match.league?.name || i.match.league_name || '';
