@@ -6,6 +6,11 @@ const errorMiddleware = require('./src/middlewares/errorMiddleware');
 const teamsRoutes = require('./src/routes/team.routes');
 const adminRoutes = require('./src/routes/admin.routes');
 const bookmakerRoutes = require('./src/routes/bookmaker.routes');
+
+//main routes
+const bookmakersRoutes = require('./src/routes/main/bookmakers.routes');
+const leaguesRoutes = require('./src/routes/main/leagues.routes');
+
 const { runPipelines } = require('./pop-db');
 const { runOddsPipeline } = require('./odds-pipeline');
 const { startStreakWorker } = require('./streak-tracker');
@@ -96,6 +101,10 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/bookmaker', bookmakerRoutes)
 
 
+
+//main routes whihc main site will use
+app.use('/api/bookmakers', bookmakersRoutes)
+app.use('/api/leagues', leaguesRoutes)
 
 
 const port = process.env.PORT || 8080;

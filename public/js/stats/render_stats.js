@@ -357,10 +357,10 @@ export function renderInsightsDashboard(insights) {
         'total-away': 'TEAM GOALS',
         'home-corners-overunder': 'TEAM CORNERS',
         'away-corners-overunder': 'TEAM CORNERS',
-        'corners-over-under': 'CORNERS OVER UNDER',
-        'goals-overunder': 'GOALS OVER UNDER',
-        'red-cards-over-under': 'RED CARDS OVER UNDER',
-        'yellow-cards-over-under': 'YELLOW CARDS OVER UNDER',
+        'corners-over-under': 'TOTAL CORNERS',
+        'goals-overunder': 'TOTAL GOALS',
+        'red-cards-over-under': 'TOTAL RED CARDS',
+        'yellow-cards-over-under': 'TOTAL YELLOW CARDS ',
         'team-yellow-cards': 'TEAM YELLOW CARDS',
         'team-red-cards': 'TEAM RED CARDS',
     };
@@ -381,7 +381,17 @@ export function renderInsightsDashboard(insights) {
     }
 
     // 3. Get master unique lists for markets
-    const allMarkets = [...new Set(insights.map(i => getMarketLabel(i.market.marketSlug)))].sort();
+    // ⭐ Fixed category order instead of alphabetical: goals → corners → yellows → reds
+    const MARKET_ORDER = ['GOALS', 'CORNERS', 'YELLOW', 'RED'];
+    const marketRank = (label) => {
+        const idx = MARKET_ORDER.findIndex(k => (label || '').includes(k));
+        return idx === -1 ? 999 : idx;
+    };
+    const allMarkets = [...new Set(insights.map(i => getMarketLabel(i.market.marketSlug)))]
+        .sort((a, b) => {
+            const r = marketRank(a) - marketRank(b);
+            return r !== 0 ? r : a.localeCompare(b); // within a category, TEAM before TOTAL
+        });
 
     // State for selected filters and pagination
     let selectedMarkets = [];
@@ -787,7 +797,7 @@ export function renderInsightsDashboard(insights) {
                                     <div class="flex flex-col items-center w-1/3 mt-2">
                                         <img src="${i.match.homeTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
                                         <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.homeTeam.name}</div>
-                                        <div class="text-[8px] font-black uppercase tracking-wider ${i.isHome ? 'text-blue-600' : 'text-black-300'}">HOME</div>
+                                        <div class="text-[8px] font-black uppercase tracking-wider ${i.isHome ? 'text-blue-600' : 'text-gray-300'}">HOME</div>
                                 ${(i.matchWinnerOdds && i.matchWinnerOdds.length)
                     ? `<button data-insight-index="${index}" data-mw-selection="home"
                                                     class="mw-odd-trigger mt-1 flex items-center gap-1 ${i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded hover:ring-2 hover:ring-blue-400 transition-all cursor-pointer">
@@ -811,7 +821,6 @@ export function renderInsightsDashboard(insights) {
                                         <img src="${i.match.awayTeam.logo_url || ''}" class="w-8 h-8 object-contain mb-1" />
                                         <div class="text-[10px] font-bold text-gray-700 truncate w-full text-center">${i.match.awayTeam.name}</div>
                                         <div class="text-[8px] font-black uppercase tracking-wider ${!i.isHome ? 'text-blue-600' : 'text-gray-300'}">AWAY</div>
-
                                    ${(i.matchWinnerOdds && i.matchWinnerOdds.length)
                     ? `<button data-insight-index="${index}" data-mw-selection="away"
                                             class="mw-odd-trigger mt-1 flex items-center gap-1 ${!i.isHome ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'} px-2 py-0.5 rounded hover:ring-2 hover:ring-blue-400 transition-all cursor-pointer">

@@ -307,7 +307,15 @@ export function loadStatEvents() {
             const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
 
             match.marketData.forEach(m => {
-                if (m.home?.streak?.length >= 3) {
+                // Team-specific slugs (e.g. 'total-home', 'home-corners-overunder') only ever
+                // describe one side of the match; the streak computed for the other side isn't
+                // a real signal for this market. Must be excluded here (not just at render time
+                // in renderInsightsDashboard) so the sidebar count badge matches what's shown.
+                const slug = (m.marketSlug || '').toLowerCase();
+                const homeSideValid = !slug.includes('away');
+                const awaySideValid = !slug.includes('home');
+
+                if (homeSideValid && m.home?.streak?.length >= 3) {
                     const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
                     const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
 
@@ -321,7 +329,7 @@ export function loadStatEvents() {
                         specificOdd
                     });
                 }
-                if (m.away?.streak?.length >= 3) {
+                if (awaySideValid && m.away?.streak?.length >= 3) {
                     const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
                     const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
 

@@ -4,6 +4,7 @@ const API_BOOKMAKER_URL = '/api/bookmaker';
 let leaguesCache = [];
 let currentFilter = 'all';
 let leagueSortableInstance = null;
+let unpinnedSortableInstance = null;
 let searchQuery = '';
 
 let countries = [];
@@ -46,6 +47,7 @@ const setupFilterListeners = () => {
             else if (id === 'filter-inactive') currentFilter = 'inactive';
             else if (id === 'filter-included') currentFilter = 'included';
             else if (id === 'filter-excluded') currentFilter = 'excluded';
+            else if (id === 'filter-pinned') currentFilter = 'pinned';
 
             renderLeaguesListUI(); // Re-render with filter
         });
@@ -362,15 +364,42 @@ const changeLeagueVisibility = async (leagueId, isChecked) => {
         renderLeaguesListUI();
     }
 }
-const changeLeagueOrder = async (leagueIds) => {
+// Fire-and-await the write only for error detection - the caller has already applied
+// the reorder optimistically, and the response has no streak/round data to merge back in.
+const changeLeagueOrder = async (pinnedIds, unpinnedIds) => {
+    await axios.post(`${API_URL}/change-order`, {
+        pinnedIds: pinnedIds,
+        unpinnedIds: unpinnedIds
+    });
+}
+
+const changeLeaguePinStatus = async (leagueId) => {
+    const league = leaguesCache.find(l => l.id === leagueId);
+    if (!league) return;
+
+    const previousLeagues = leaguesCache.map(l => ({ ...l }));
+    const nextPinned = !league.is_pinned;
+
+    // Mirror the backend: land at the end of whichever zone it's entering.
+    const maxOrderInTargetGroup = leaguesCache
+        .filter(l => l.is_pinned === nextPinned && l.id !== leagueId)
+        .reduce((max, l) => Math.max(max, l.display_order ?? -1), -1);
+
+    league.is_pinned = nextPinned;
+    league.display_order = maxOrderInTargetGroup + 1;
+
+    renderLeagueSummery(leaguesCache);
+    renderLeaguesListUI();
+
     try {
-        const response = await axios.post(`${API_URL}/change-order`, {
-            leagueIds: leagueIds
+        await axios.post(`${API_URL}/change-pin-status`, {
+            leagueId: leagueId
         });
-        return response.data?.data || response.data;
-        console.log(response?.data);
     } catch (error) {
         console.log(error);
+        leaguesCache = previousLeagues;
+        renderLeagueSummery(leaguesCache);
+        renderLeaguesListUI();
     }
 }
 
@@ -479,21 +508,72 @@ const renderLeagueSummery = (leagueData) => {
 
     const activeCount = leagueData.filter(league => league.is_active).length;
     const inactiveCount = leagueData.filter(league => !league.is_visible).length;
+    const pinnedCount = leagueData.filter(league => league.is_pinned).length;
     const totalCount = leagueData.length;
 
     document.getElementById('active-count').innerText = activeCount;
     document.getElementById('inactive-count').innerText = inactiveCount;
+    document.getElementById('pinned-count').innerText = pinnedCount;
     document.getElementById('total-count').innerText = totalCount;
 };
+
+const renderLeagueRow = (league, index, draggable) => `
+    <div data-id="${league.id}" class="flex items-center p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors group ${draggable ? 'cursor-move' : 'cursor-default'}">
+        <div class="text-gray-300 mr-2 opacity-50 ${draggable ? 'group-hover:opacity-100' : 'hidden'}">⋮⋮</div>
+
+        <div class="row-number w-8 text-gray-400 font-bold text-sm text-center">${index + 1}</div>
+
+        <div class="flex-1 pl-4 flex flex-col gap-1">
+            <!-- 1. Country & League Title Line -->
+            <h4 class="text-sm text-gray-900 font-medium">
+                ${league.country ? `<span class="text-gray-800 font-semibold">${league.country}:</span>` : ''}
+                <span class="font-bold text-gray-950">${league.name}</span>
+            </h4>
+
+            <!-- 2. Round/Matchday Pill Badge (Matches image_2e45be.png) -->
+            <div class="flex items-center">
+                <span class="inline-flex items-center border border-teal-500/40 text-teal-700 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-teal-50/50">
+                    Round: ${league.currentMatchday ?? 0}
+                </span>
+            </div>
+
+            <!-- 3. Active Streaks Counter -->
+            <div class="text-sm text-gray-500 font-medium mt-0.5">
+                Active Streaks: <span class="text-gray-700 font-bold ml-1">${league.streakCount ?? 0}</span>
+            </div>
+        </div>
+
+        <!-- Actions: Pin toggle + Visibility Toggle Switch -->
+        <div class="flex items-center gap-4 cursor-default" onmousedown="event.stopPropagation()">
+            <button type="button" title="${league.is_pinned ? 'Unpin league' : 'Pin league'}"
+                onclick="changeLeaguePinStatus(${league.id})"
+                class="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors ${league.is_pinned ? 'bg-amber-50 border-amber-300 text-amber-500' : 'bg-white border-gray-200 text-gray-300 hover:text-gray-400'}">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${league.is_pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" class="w-4 h-4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.348 14.652 3 21m6.348-6.348 4.242-9.899a1 1 0 0 1 1.65-.312l4.319 4.319a1 1 0 0 1-.312 1.65l-9.899 4.242Z" />
+                </svg>
+            </button>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="sr-only peer"
+                    ${league.is_visible ? 'checked' : ''}
+                    onchange="changeLeagueVisibility(${league.id}, this.checked)">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+            </label>
+        </div>
+    </div>
+`;
 
 const renderLeaguesListUI = () => {
     const leagueContainer = document.getElementById('league-byorder-container');
     if (!leaguesCache) return;
 
-    // --- CLEANUP: Destroy existing instance before re-rendering ---
+    // --- CLEANUP: Destroy existing instances before re-rendering ---
     if (leagueSortableInstance) {
         leagueSortableInstance.destroy();
         leagueSortableInstance = null;
+    }
+    if (unpinnedSortableInstance) {
+        unpinnedSortableInstance.destroy();
+        unpinnedSortableInstance = null;
     }
 
     // 1. FILTERING LOGIC
@@ -502,73 +582,83 @@ const renderLeaguesListUI = () => {
     else if (currentFilter === 'inactive') displayList = leaguesCache.filter(l => !l.is_active);
     else if (currentFilter === 'included') displayList = leaguesCache.filter(l => l.is_visible);
     else if (currentFilter === 'excluded') displayList = leaguesCache.filter(l => !l.is_visible);
+    else if (currentFilter === 'pinned') displayList = leaguesCache.filter(l => l.is_pinned);
 
     if (searchQuery) {
         displayList = displayList.filter(l => l.name.toLowerCase().includes(searchQuery));
     }
 
-    // 2. RENDER THE FILTERED LIST
-    leagueContainer.innerHTML = displayList.map((league, index) => `
-    <div data-id="${league.id}" class="flex items-center p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors group ${currentFilter === 'all' ? 'cursor-move' : 'cursor-default'}">
-        <div class="text-gray-300 mr-2 opacity-50 ${currentFilter === 'all' ? 'group-hover:opacity-100' : 'hidden'}">⋮⋮</div>
-        
-        <div class="row-number w-8 text-gray-400 font-bold text-sm text-center">${index + 1}</div>
-        
-        <div class="flex-1 pl-4 flex flex-col gap-1">
-            <!-- 1. Country & League Title Line -->
-            <h4 class="text-sm text-gray-900 font-medium">
-                ${league.country ? `<span class="text-gray-800 font-semibold">${league.country}:</span>` : ''} 
-                <span class="font-bold text-gray-950">${league.name}</span>
-            </h4>
-            
-            <!-- 2. Round/Matchday Pill Badge (Matches image_2e45be.png) -->
-            <div class="flex items-center">
-                <span class="inline-flex items-center border border-teal-500/40 text-teal-700 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-teal-50/50">
-                    Round: ${league.currentMatchday ?? 0}
-                </span>
-            </div>
-            
-            <!-- 3. Active Streaks Counter -->
-            <div class="text-sm text-gray-500 font-medium mt-0.5">
-                Active Streaks: <span class="text-gray-700 font-bold ml-1">${league.streakCount ?? 0}</span>
-            </div>
-        </div>
-        
-        <!-- Action Toggle Switch -->
-        <div class="flex items-center gap-4 cursor-default" onmousedown="event.stopPropagation()">
-            <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" class="sr-only peer" 
-                    ${league.is_visible ? 'checked' : ''} 
-                    onchange="changeLeagueVisibility(${league.id}, this.checked)">
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
-            </label>
-        </div>
-    </div>
-`).join('');
+    // 2. DRAG-AND-DROP IS ONLY MEANINGFUL ON THE UNFILTERED "ALL" VIEW, SPLIT INTO
+    //    A PINNED ZONE AND AN "OTHERS" ZONE. Which zone a row is dropped into is what
+    //    decides its pinned state - dragging across the divider pins/unpins it.
+    const zonesEnabled = currentFilter === 'all' && !searchQuery;
 
-    // 3. SORTABLE LOGIC: Only initialize if currentFilter is 'all'
-    if (currentFilter === 'all' && !searchQuery) {
-        leagueSortableInstance = Sortable.create(leagueContainer, {
+    if (zonesEnabled) {
+        const pinnedList = displayList.filter(l => l.is_pinned);
+        const unpinnedList = displayList.filter(l => !l.is_pinned);
+
+        leagueContainer.innerHTML = `
+            <div class="px-4 py-2 bg-amber-50/60 border-b border-amber-100 text-xs font-semibold text-amber-700 uppercase tracking-wider">
+                📌 Pinned leagues
+            </div>
+            <div id="pinned-leagues-list" class="min-h-[3rem]">
+                ${pinnedList.map((league, index) => renderLeagueRow(league, index, true)).join('') || `<div class="p-4 text-sm text-gray-400 italic">Drag a league here to pin it</div>`}
+            </div>
+            <div class="px-4 py-2 bg-gray-50 border-y border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                All other leagues
+            </div>
+            <div id="unpinned-leagues-list" class="min-h-[3rem]">
+                ${unpinnedList.map((league, index) => renderLeagueRow(league, index, true)).join('')}
+            </div>
+        `;
+
+        const pinnedContainer = document.getElementById('pinned-leagues-list');
+        const unpinnedContainer = document.getElementById('unpinned-leagues-list');
+
+        leagueSortableInstance = Sortable.create(pinnedContainer, {
+            group: 'leagues-zones',
             animation: 150,
             ghostClass: 'opacity-50',
-            onEnd: async function () {
-                const previousLeagues = [...leaguesCache];
-                const rowElements = leagueContainer.querySelectorAll('div[data-id]');
-                const newOrderIds = Array.from(rowElements).map(el => parseInt(el.dataset.id));
-
-                rowElements.forEach((row, idx) => row.querySelector('.row-number').innerText = idx + 1);
-                leaguesCache.sort((a, b) => newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id));
-
-                try {
-                    const updatedLeagues = await changeLeagueOrder(newOrderIds);
-                    if (updatedLeagues) leaguesCache = updatedLeagues;
-                } catch (error) {
-                    alert("Failed to save new order.");
-                    leaguesCache = previousLeagues;
-                    renderLeaguesListUI();
-                }
-            }
+            onEnd: handleLeagueDragEnd
         });
+        unpinnedSortableInstance = Sortable.create(unpinnedContainer, {
+            group: 'leagues-zones',
+            animation: 150,
+            ghostClass: 'opacity-50',
+            onEnd: handleLeagueDragEnd
+        });
+    } else {
+        leagueContainer.innerHTML = displayList.map((league, index) => renderLeagueRow(league, index, false)).join('');
+    }
+}
+
+const handleLeagueDragEnd = async () => {
+    const previousLeagues = [...leaguesCache];
+
+    const pinnedContainer = document.getElementById('pinned-leagues-list');
+    const unpinnedContainer = document.getElementById('unpinned-leagues-list');
+    const pinnedIds = Array.from(pinnedContainer.querySelectorAll('div[data-id]')).map(el => parseInt(el.dataset.id));
+    const unpinnedIds = Array.from(unpinnedContainer.querySelectorAll('div[data-id]')).map(el => parseInt(el.dataset.id));
+
+    // Optimistically update local state: zone membership determines is_pinned.
+    pinnedIds.forEach((id, idx) => {
+        const league = leaguesCache.find(l => l.id === id);
+        if (league) { league.is_pinned = true; league.display_order = idx; }
+    });
+    unpinnedIds.forEach((id, idx) => {
+        const league = leaguesCache.find(l => l.id === id);
+        if (league) { league.is_pinned = false; league.display_order = idx; }
+    });
+    renderLeagueSummery(leaguesCache);
+    renderLeaguesListUI();
+
+    try {
+        await changeLeagueOrder(pinnedIds, unpinnedIds);
+    } catch (error) {
+        alert("Failed to save new order.");
+        leaguesCache = previousLeagues;
+        renderLeagueSummery(leaguesCache);
+        renderLeaguesListUI();
     }
 }
 

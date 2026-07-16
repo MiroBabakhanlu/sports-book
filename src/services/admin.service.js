@@ -7,66 +7,15 @@ const adminService = {
 
     getALlLeagues: async () => {
         let allLeagues = await prisma.league.findMany({
-            orderBy: {
-                display_order: 'asc'
-            }
+            orderBy: [
+                { is_pinned: 'desc' },
+                { display_order: 'asc' }
+            ]
         }) ?? [];
 
-        let ids = allLeagues.map(league => league.id);
-
-        for (let i = 0; i < ids.length; i++) {
-            const leagueId = ids[i];
-            let updatedLeagueData = allLeagues.find(l => l.id == leagueId);
-
-            // --- Your Existing Streak Logic ---
-            const test = await getUpcomingMatches({ leagueId, seasonYear: 2026 });
-            updatedLeagueData.streakCount = handleLeaueStreakCount(test)[`${leagueId}`] ?? 0;
-
-            // --- FIXED: Current Matchday via Highest Finished Matchday Number ---
-            const season = await prisma.season.findFirst({
-                where: {
-                    league_id: leagueId,
-                    year: "2026"
-                }
-            });
-
-            if (season) {
-                const highestFinishedMatchday = await prisma.match.findFirst({
-                    where: {
-                        season_id: season.id,
-                        status: { in: ["FT", "AET", "PEN"] }, // Only finished games
-                        matchday: { not: null }
-                    },
-                    orderBy: {
-                        matchday: 'desc' // <-- YOUR LOGIC: Gets the absolute highest round number first
-                    },
-                    select: {
-                        matchday: true
-                    }
-                });
-
-                if (highestFinishedMatchday?.matchday) {
-                    // If Matchday 18 has finished games, this guarantees we display 18
-                    updatedLeagueData.currentMatchday = highestFinishedMatchday.matchday;
-                } else {
-                    // Fallback: If ZERO games have finished yet, default to the first scheduled round
-                    const firstScheduledMatch = await prisma.match.findFirst({
-                        where: { season_id: season.id, matchday: { not: null } },
-                        orderBy: { kickoff_at: 'asc' },
-                        select: { matchday: true }
-                    });
-
-                    updatedLeagueData.currentMatchday = firstScheduledMatch?.matchday ?? 1;
-                }
-            } else {
-                updatedLeagueData.currentMatchday = 0;
-            }
-        }
-
-        return allLeagues;
+        return enrichLeaguesWithStreakAndMatchday(allLeagues);
     },
     changeVisibility: async (leagueId) => {
-        console.log(leagueId)
         if (!leagueId) {
             throw new AppError('leagueId is required', 400);
         }
@@ -86,32 +35,129 @@ const adminService = {
             }
         })
 
-        const allLeagues = prisma.league.findMany();
-        return allLeagues;
+        return updatedLeagueData;
     },
-    changeLeagueOrder: async (leagueIds) => {
-        console.log('leagueIds', leagueIds)
-        if (!leagueIds || !Array.isArray(leagueIds)) {
-            throw new AppError('leagueIds array is required', 400);
+    // pinnedIds / unpinnedIds: each is the full ordered list of league ids for that zone.
+    // A league's zone membership (which array it's found in) is what determines is_pinned,
+    // so dragging an item into the other zone re-pins/un-pins it as part of the same update.
+    // NOTE: intentionally does NOT recompute streakCount/currentMatchday - that's an expensive
+    // per-league query pipeline meant only for the initial page load, not every reorder.
+    changeLeagueOrder: async (pinnedIds, unpinnedIds) => {
+        if (!Array.isArray(pinnedIds) || !Array.isArray(unpinnedIds)) {
+            throw new AppError('pinnedIds and unpinnedIds arrays are required', 400);
         }
 
-        const updateOperations = leagueIds.map((id, index) => {
-            return prisma.league.update({
+        const updateOperations = [
+            ...pinnedIds.map((id, index) => prisma.league.update({
                 where: { id: Number(id) },
-                data: { display_order: index }
-            });
+                data: { is_pinned: true, display_order: index }
+            })),
+            ...unpinnedIds.map((id, index) => prisma.league.update({
+                where: { id: Number(id) },
+                data: { is_pinned: false, display_order: index }
+            }))
+        ];
+
+        const updatedLeagues = await prisma.$transaction(updateOperations);
+        return updatedLeagues;
+    },
+    // Same note as changeLeagueOrder: no streak/matchday recompute here, just the pin write.
+    changePinStatus: async (leagueId) => {
+        if (!leagueId) {
+            throw new AppError('leagueId is required', 400);
+        }
+
+        const leagueData = await prisma.league.findUnique({
+            where: { id: Number(leagueId) },
+            select: { is_pinned: true },
         });
 
-        await prisma.$transaction(updateOperations);
+        if (!leagueData) {
+            throw new AppError('leagueData is required', 404);
+        }
 
-        const allLeagues = await prisma.league.findMany({
-            orderBy: { display_order: 'asc' }
+        const nextPinned = !leagueData.is_pinned;
+
+        // Place the league at the end of whichever group it's entering,
+        // so the manual toggle behaves the same as dropping it at the end of that zone.
+        const lastInGroup = await prisma.league.findFirst({
+            where: { is_pinned: nextPinned },
+            orderBy: { display_order: 'desc' },
+            select: { display_order: true }
         });
-        return allLeagues;
+
+        const updatedLeague = await prisma.league.update({
+            where: { id: Number(leagueId) },
+            data: {
+                is_pinned: nextPinned,
+                display_order: (lastInGroup?.display_order ?? -1) + 1
+            }
+        });
+
+        return updatedLeague;
     }
 
 }
 
+// Adds streakCount and currentMatchday to each league. Every endpoint that returns
+// league lists to the admin UI needs this, or those fields silently fall back to 0/undefined.
+async function enrichLeaguesWithStreakAndMatchday(allLeagues) {
+    // getUpcomingMatches's param is leagueIds (plural/array) - fetch once for every league
+    // and derive per-league counts from the single result, instead of calling it once per
+    // league (which used to silently ignore the filter and refetch+reprocess the entire
+    // upcoming-matches dataset N times).
+    const leagueIds = allLeagues.map(league => league.id);
+    const upcomingMatches = await getUpcomingMatches({ leagueIds, seasonYear: 2026 });
+    const streakCountsByLeague = handleLeaueStreakCount(upcomingMatches);
+
+    for (const league of allLeagues) {
+        const leagueId = league.id;
+
+        league.streakCount = streakCountsByLeague[`${leagueId}`] ?? 0;
+
+        // --- FIXED: Current Matchday via Highest Finished Matchday Number ---
+        const season = await prisma.season.findFirst({
+            where: {
+                league_id: leagueId,
+                year: "2026"
+            }
+        });
+
+        if (season) {
+            const highestFinishedMatchday = await prisma.match.findFirst({
+                where: {
+                    season_id: season.id,
+                    status: { in: ["FT", "AET", "PEN"] }, // Only finished games
+                    matchday: { not: null }
+                },
+                orderBy: {
+                    matchday: 'desc' // <-- YOUR LOGIC: Gets the absolute highest round number first
+                },
+                select: {
+                    matchday: true
+                }
+            });
+
+            if (highestFinishedMatchday?.matchday) {
+                // If Matchday 18 has finished games, this guarantees we display 18
+                league.currentMatchday = highestFinishedMatchday.matchday;
+            } else {
+                // Fallback: If ZERO games have finished yet, default to the first scheduled round
+                const firstScheduledMatch = await prisma.match.findFirst({
+                    where: { season_id: season.id, matchday: { not: null } },
+                    orderBy: { kickoff_at: 'asc' },
+                    select: { matchday: true }
+                });
+
+                league.currentMatchday = firstScheduledMatch?.matchday ?? 1;
+            }
+        } else {
+            league.currentMatchday = 0;
+        }
+    }
+
+    return allLeagues;
+}
 
 function handleLeaueStreakCount(AllLeaguesResults) {
     const insights = [];
@@ -121,7 +167,17 @@ function handleLeaueStreakCount(AllLeaguesResults) {
         const awayOddObj = match.matchWinnerOdds?.find(o => o.selection === 'away');
 
         match.marketData.forEach(m => {
-            if (m.home?.streak?.length >= 3) {
+            // Team-specific slugs (e.g. 'total-home', 'home-corners-overunder') only ever
+            // describe one side of the match. The backend still computes a streak for the
+            // other side too (it's a generic per-team lookup), but that value isn't a real
+            // signal for this market and must not be counted as an insight - otherwise the
+            // count here disagrees with what renderInsightsDashboard actually displays
+            // (which already filters these out client-side).
+            const slug = (m.marketSlug || '').toLowerCase();
+            const homeSideValid = !slug.includes('away');
+            const awaySideValid = !slug.includes('home');
+
+            if (homeSideValid && m.home?.streak?.length >= 3) {
                 const direction = m?.home?.streak.direction == 'below' ? 'OVER' : 'UNDER';
                 const specificOdd = getOddForPrediction(m, direction, m.home.suggestedValue);
 
@@ -135,7 +191,7 @@ function handleLeaueStreakCount(AllLeaguesResults) {
                     specificOdd
                 });
             }
-            if (m.away?.streak?.length >= 3) {
+            if (awaySideValid && m.away?.streak?.length >= 3) {
                 const direction = m?.away?.streak.direction == 'below' ? 'OVER' : 'UNDER';
                 const specificOdd = getOddForPrediction(m, direction, m.away.suggestedValue);
 

@@ -196,7 +196,7 @@
 
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="league-summery-container">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="league-summery-container">
                 <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center">
                     <h2 class="text-3xl font-bold text-teal-600 mb-1" id="active-count">0</h2>
                     <p class="text-xs text-gray-500 uppercase tracking-wider">Active leagues</p>
@@ -204,6 +204,10 @@
                 <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center">
                     <h2 class="text-3xl font-bold text-gray-400 mb-1" id="inactive-count">0</h2>
                     <p class="text-xs text-gray-500 uppercase tracking-wider">Inactive / hidden</p>
+                </div>
+                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center">
+                    <h2 class="text-3xl font-bold text-amber-500 mb-1" id="pinned-count">0</h2>
+                    <p class="text-xs text-gray-500 uppercase tracking-wider">Pinned leagues</p>
                 </div>
                 <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center">
                     <h2 class="text-3xl font-bold text-gray-800 mb-1" id="total-count">0</h2>
@@ -227,6 +231,8 @@
                     <button id="filter-excluded"
                         class="px-4 py-2 bg-white text-gray-600 text-sm hover:bg-gray-50 border-r border-gray-200 transition-colors">Not
                         Included</button>
+                    <button id="filter-pinned"
+                        class="px-4 py-2 bg-white text-gray-600 text-sm hover:bg-gray-50 transition-colors">Pinned</button>
                 </div>
 
             </div>

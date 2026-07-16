@@ -35,6 +35,7 @@ model League {
 
   is_visible    Boolean @default(true)
   display_order Int     @default(999)
+  is_pinned     Boolean @default(false)
 
   // Relations
   sport   Sport    @relation(fields: [sport_id], references: [id])

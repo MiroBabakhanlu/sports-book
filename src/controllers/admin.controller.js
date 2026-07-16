@@ -26,12 +26,23 @@ const adminController = {
     },
     changeLeagueOrder: async (req, res, next) => {
         try {
-            const result = await adminService.changeLeagueOrder(req.body?.leagueIds);
+            const result = await adminService.changeLeagueOrder(req.body?.pinnedIds, req.body?.unpinnedIds);
             return res.status(200).json({
                 success: true,
                 data: result
             })
 
+        } catch (error) {
+            next(error)
+        }
+    },
+    changePinStatus: async (req, res, next) => {
+        try {
+            const result = await adminService.changePinStatus(req.body?.leagueId);
+            return res.status(200).json({
+                success: true,
+                data: result
+            })
         } catch (error) {
             next(error)
         }
