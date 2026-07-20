@@ -47,6 +47,28 @@ const adminController = {
             next(error)
         }
     },
+    getApiToken: async (req, res, next) => {
+        try {
+            const result = await adminService.getApiToken();
+            return res.status(200).json({
+                success: true,
+                data: result
+            })
+        } catch (error) {
+            next(error)
+        }
+    },
+    regenerateApiToken: async (req, res, next) => {
+        try {
+            const result = await adminService.regenerateApiToken();
+            return res.status(200).json({
+                success: true,
+                data: result
+            })
+        } catch (error) {
+            next(error)
+        }
+    },
 
 }
 

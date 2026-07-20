@@ -1,4 +1,5 @@
-const AppError = require("../middlewares/errorMiddleware");
+const crypto = require("crypto");
+const AppError = require("../middlewares/AppError");
 const { prisma } = require("../utils/prisma");
 const { getUpcomingMatches } = require("./teams.service");
 
@@ -95,6 +96,36 @@ const adminService = {
         });
 
         return updatedLeague;
+    },
+
+    // Returns the token authMiddleware currently accepts - the "Manage API" admin
+    // panel section displays this so it can be copied over to the frontend team.
+    getApiToken: async () => {
+        const active = await prisma.apiToken.findFirst({
+            where: { is_active: true },
+            orderBy: { created_at: 'desc' }
+        });
+
+        if (!active) {
+            throw new AppError('No active API token found', 404);
+        }
+
+        return active;
+    },
+
+    // Deactivates the current token and issues a new one. Takes effect immediately -
+    // authMiddleware checks is_active on every request, so the old token stops
+    // working the instant this runs. The new value must be handed to the frontend
+    // team before/along with rotating it, or their requests start 401ing.
+    regenerateApiToken: async () => {
+        const newToken = crypto.randomBytes(32).toString('hex');
+
+        const [, created] = await prisma.$transaction([
+            prisma.apiToken.updateMany({ where: { is_active: true }, data: { is_active: false } }),
+            prisma.apiToken.create({ data: { token: newToken } })
+        ]);
+
+        return created;
     }
 
 }

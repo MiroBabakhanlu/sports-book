@@ -119,4 +119,8 @@ const leaguesServices = {
     },
 };
 
+// Exposed so other "main" services (e.g. streaks) can resolve a country -> flag URL
+// without duplicating the country-index fetch/memoization logic.
+leaguesServices.getFlag = getFlag;
+
 module.exports = leaguesServices;

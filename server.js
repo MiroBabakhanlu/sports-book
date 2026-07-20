@@ -1,8 +1,11 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const path = require('path');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./src/utils/swagger');
 const { connectDB } = require('./src/utils/prisma');
 const errorMiddleware = require('./src/middlewares/errorMiddleware');
+const authMiddleware = require('./src/middlewares/authMiddleware');
 const teamsRoutes = require('./src/routes/team.routes');
 const adminRoutes = require('./src/routes/admin.routes');
 const bookmakerRoutes = require('./src/routes/bookmaker.routes');
@@ -10,6 +13,8 @@ const bookmakerRoutes = require('./src/routes/bookmaker.routes');
 //main routes
 const bookmakersRoutes = require('./src/routes/main/bookmakers.routes');
 const leaguesRoutes = require('./src/routes/main/leagues.routes');
+const streaksRoutes = require('./src/routes/main/streaks.routes');
+const clicksRoutes = require('./src/routes/main/clicks.routes');
 
 const { runPipelines } = require('./pop-db');
 const { runOddsPipeline } = require('./odds-pipeline');
@@ -102,9 +107,16 @@ app.use('/api/bookmaker', bookmakerRoutes)
 
 
 
-//main routes whihc main site will use
-app.use('/api/bookmakers', bookmakersRoutes)
-app.use('/api/leagues', leaguesRoutes)
+//main routes whihc main site will use - guarded by Bearer token auth (authMiddleware)
+app.use('/api/bookmakers', authMiddleware, bookmakersRoutes)
+app.use('/api/leagues', authMiddleware, leaguesRoutes)
+app.use('/api/streaks', authMiddleware, streaksRoutes)
+app.use('/api/clicks', authMiddleware, clicksRoutes)
+
+// Swagger UI for the main-site endpoints above. Docs live as @openapi JSDoc
+// blocks next to each route (src/routes/main/*.routes.js) so they can't drift
+// out of sync with a separately-maintained spec file.
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 
 const port = process.env.PORT || 8080;
@@ -113,10 +125,10 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        runPipelines(targetLeagues)
+        // runPipelines(targetLeagues)
 
         // runOddsPipeline(activeLeagues);
-        // startStreakWorker(targetLeagues);
+        startStreakWorker(targetLeagues);
 
         // require('./update-db');
     } catch (err) {

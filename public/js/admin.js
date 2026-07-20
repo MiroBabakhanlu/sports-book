@@ -32,6 +32,40 @@ document.getElementById('recordsViewBtn').addEventListener('click', () => {
     openConfigContainer('records-container');
 });
 
+document.getElementById('apiTokenViewBtn').addEventListener('click', () => {
+    openConfigContainer('api-token-config-container');
+});
+
+document.getElementById('copy-api-token-btn').addEventListener('click', async () => {
+    const input = document.getElementById('api-token-value');
+    const btn = document.getElementById('copy-api-token-btn');
+    if (!input.value) return;
+
+    await navigator.clipboard.writeText(input.value);
+    const original = btn.innerText;
+    btn.innerText = 'Copied!';
+    setTimeout(() => { btn.innerText = original; }, 1500);
+});
+
+document.getElementById('regenerate-api-token-btn').addEventListener('click', async () => {
+    if (!confirm('Regenerate the API token? The old token stops working immediately - make sure the frontend team is ready to update it.')) return;
+
+    const btn = document.getElementById('regenerate-api-token-btn');
+    btn.disabled = true;
+    btn.innerText = 'Regenerating...';
+
+    try {
+        const tokenData = await regenerateApiToken();
+        renderApiTokenUI(tokenData);
+    } catch (error) {
+        console.log(error);
+        alert('Failed to regenerate token.');
+    } finally {
+        btn.disabled = false;
+        btn.innerText = 'Regenerate token';
+    }
+});
+
 const setupFilterListeners = () => {
     const filterButtons = document.querySelectorAll('#filter-container button');
     filterButtons.forEach(btn => {
@@ -404,6 +438,21 @@ const changeLeaguePinStatus = async (leagueId) => {
 }
 
 
+const getApiToken = async () => {
+    try {
+        const response = await axios.get(`${API_URL}/api-token`);
+        return response.data?.data;
+    } catch (error) {
+        console.log(error);
+        return null;
+    }
+}
+
+const regenerateApiToken = async () => {
+    const response = await axios.post(`${API_URL}/api-token/regenerate`);
+    return response.data?.data;
+}
+
 const getAllBookmakers = async () => {
     try {
         const response = await axios.get(`${API_BOOKMAKER_URL}/bookmakers`);
@@ -669,6 +718,26 @@ const renderLeagues = async () => {
     renderLeaguesListUI();
 }
 
+
+const renderApiTokenUI = (tokenData) => {
+    const input = document.getElementById('api-token-value');
+    const createdAt = document.getElementById('api-token-created-at');
+
+    if (!tokenData) {
+        input.value = '';
+        createdAt.innerText = 'Failed to load token.';
+        return;
+    }
+
+    input.value = tokenData.token;
+    createdAt.innerText = `Issued: ${new Date(tokenData.created_at).toLocaleString()}`;
+}
+
+const renderApiToken = async () => {
+    document.getElementById('api-token-value').value = 'Loading...';
+    const tokenData = await getApiToken();
+    renderApiTokenUI(tokenData);
+}
 
 const renderBookmakers = async () => {
     const response = await getAllBookmakers();
@@ -963,12 +1032,15 @@ const openConfigContainer = (containerId) => {
     const leagueConfig = document.getElementById('league-config-container');
     const bookmakerConfig = document.getElementById('bookmaker-config-container');
     const recordsView = document.getElementById('records-container');
+    const apiTokenConfig = document.getElementById('api-token-config-container');
     const leagueBtn = document.getElementById('leagueViewBtn');
     const bookmakerBtn = document.getElementById('bookmakerViewBtn');
     const recordsBtn = document.getElementById('recordsViewBtn');
+    const apiTokenBtn = document.getElementById('apiTokenViewBtn');
 
     leagueConfig.classList.add('hidden');
     bookmakerConfig.classList.add('hidden');
+    apiTokenConfig.classList.add('hidden');
     document.getElementById('leaguesContainer').style.display = 'none'
     document.getElementById('openAllMArketsBtn').style.display = 'none'
     document.getElementById('records-container').style.display = 'none'
@@ -976,6 +1048,7 @@ const openConfigContainer = (containerId) => {
     leagueBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
     bookmakerBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
     recordsViewBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
+    apiTokenBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
 
 
     if (containerId === 'league-config-container') {
@@ -998,6 +1071,12 @@ const openConfigContainer = (containerId) => {
         recordsViewBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
         document.getElementById('openAllMArketsBtn').style.display = 'block'
         document.getElementById('records-container').style.display = 'block'
+    }
+
+    if (containerId === 'api-token-config-container') {
+        apiTokenConfig.classList.remove('hidden');
+        apiTokenBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
+        renderApiToken();
     }
 }
 

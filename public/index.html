@@ -172,6 +172,9 @@
                 <li
                     class="px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer opacity-50 transition-colors">
                     Notifications</li>
+                <li id="apiTokenViewBtn"
+                    class="px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors">
+                    Manage API</li>
                 <!-- <a href="./stats.html"
                     class="px-6 py-2.5 text-sm text-red-600 hover:bg-gray-50 cursor-pointer transition-colors"
                     id="switch-stats-page">
@@ -247,6 +250,41 @@
 
         <div id="bookmaker-config-container" class="hidden">
             <h1 class="text-2xl font-bold text-gray-900 mb-1">Bookmaker Configuration</h1>
+        </div>
+
+        <div id="api-token-config-container" class="hidden max-w-2xl">
+            <h1 class="text-2xl font-bold text-gray-900 mb-1">Manage API</h1>
+            <p class="text-sm text-gray-500 mb-6">
+                Bearer token the external frontend sends on every request to /api/bookmakers,
+                /api/leagues, /api/streaks and /api/clicks.
+            </p>
+
+            <div class="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-5">
+                <div>
+                    <label class="text-xs font-bold text-gray-400 uppercase tracking-wider">Current
+                        token</label>
+                    <div class="flex items-center gap-2 mt-2">
+                        <input id="api-token-value" type="text" readonly
+                            class="flex-1 border border-gray-200 rounded-lg p-2.5 text-sm font-mono bg-gray-50 text-gray-700" />
+                        <button id="copy-api-token-btn"
+                            class="px-4 py-2.5 rounded-lg text-sm font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors whitespace-nowrap">
+                            Copy
+                        </button>
+                    </div>
+                    <p id="api-token-created-at" class="text-xs text-gray-400 mt-2"></p>
+                </div>
+
+                <div class="border-t border-gray-100 pt-4">
+                    <button id="regenerate-api-token-btn"
+                        class="px-4 py-2.5 rounded-lg text-sm font-semibold bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
+                        Regenerate token
+                    </button>
+                    <p class="text-xs text-gray-400 mt-2">
+                        Regenerating immediately invalidates the current token - any client still
+                        using the old value gets 401s until it's updated with the new one.
+                    </p>
+                </div>
+            </div>
         </div>
 
         <div id="records-container">

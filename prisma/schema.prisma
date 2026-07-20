@@ -230,3 +230,24 @@ model TeamStreak {
   @@unique([team_id, season_id, market_id], name: "team_id_season_id_market_id")
   @@map("TEAM_STREAK")
 }
+
+model ClickLog {
+  id         Int      @id @default(autoincrement())
+  streak_id  String // raw "streak_921" style id, analytics only - no FK, not validated against TeamStreak
+  bookmaker  String
+  click_type String
+  country    String?
+  session_id String?
+  created_at DateTime @default(now())
+
+  @@map("CLICK_LOG")
+}
+
+model ApiToken {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+
+  @@map("API_TOKEN")
+}

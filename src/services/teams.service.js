@@ -303,10 +303,17 @@ const teamsServices = {
         if (matches.length === 0) return [];
 
         const validMatches = [];
+        // Tracks, for the "all teams" aggregate view, which match is each team's OWN
+        // absolute next fixture. A match can end up in validMatches solely because
+        // it's team A's next match, while also featuring team B as the other side -
+        // even though this ISN'T team B's own next match (B's real next match is a
+        // different, earlier fixture with its own entry in validMatches). We need
+        // this map below so B's streak doesn't get incorrectly attached to A's match.
+        let teamNextMatches = null;
         if (teamId) {
             validMatches.push(matches[0]);
         } else {
-            const teamNextMatches = new Map();
+            teamNextMatches = new Map();
             for (const match of matches) {
                 if (!teamNextMatches.has(match.home_team_id)) teamNextMatches.set(match.home_team_id, match);
                 if (!teamNextMatches.has(match.away_team_id)) teamNextMatches.set(match.away_team_id, match);
@@ -321,6 +328,43 @@ const teamsServices = {
 
         const uniqueTeamIds = [...new Set(validMatches.flatMap(m => [m.home_team_id, m.away_team_id]))];
         const uniqueSeasonIds = [...new Set(validMatches.map(m => m.season_id))];
+
+        // ─── ABSOLUTE NEXT MATCH MAP (works for BOTH teamId mode and "all teams"
+        // mode) ──────────────────────────────────────────────────────────────
+        // A team's streak/prediction data must only ever be attached to a match
+        // that is genuinely that team's own next unplayed fixture - never
+        // "borrowed" onto a match that's actually the opponent's next fixture.
+        // teamNextMatches (above) can't be reused for this: in teamId mode it's
+        // null (query is scoped only to the requested team, so it has no
+        // visibility into the opponent's other matches), and even in "all teams"
+        // mode it's restricted by leagueIds. So we compute a separate,
+        // unrestricted map here (no leagueIds/teamId filter) covering every team
+        // that appears in validMatches, to find each one's TRUE absolute next
+        // match regardless of league/team scoping.
+        const absoluteNextMatchByTeam = new Map();
+        {
+            const candidateMatches = await prisma.match.findMany({
+                where: {
+                    status: { in: ['NS', 'PST'] },
+                    kickoff_at: { gte: now },
+                    season: { year: seasonYear.toString() },
+                    OR: [
+                        { home_team_id: { in: uniqueTeamIds } },
+                        { away_team_id: { in: uniqueTeamIds } }
+                    ]
+                },
+                select: { id: true, home_team_id: true, away_team_id: true },
+                orderBy: { kickoff_at: 'asc' }
+            });
+            for (const m of candidateMatches) {
+                if (uniqueTeamIds.includes(m.home_team_id) && !absoluteNextMatchByTeam.has(m.home_team_id)) {
+                    absoluteNextMatchByTeam.set(m.home_team_id, m.id);
+                }
+                if (uniqueTeamIds.includes(m.away_team_id) && !absoluteNextMatchByTeam.has(m.away_team_id)) {
+                    absoluteNextMatchByTeam.set(m.away_team_id, m.id);
+                }
+            }
+        }
 
         const [allAverages, allStreaks] = await Promise.all([
             prisma.teamSeasonAverage.findMany({
@@ -350,13 +394,20 @@ const teamsServices = {
         });
 
         const result = validMatches.map((match) => {
+            // A side is only "eligible" for its streak/prediction data if this match
+            // is genuinely that team's own absolute next fixture - true in BOTH
+            // teamId mode and "all teams" mode (see absoluteNextMatchByTeam above).
+            const isHomeTeamsNextMatch = absoluteNextMatchByTeam.get(match.home_team_id) === match.id;
+            const isAwayTeamsNextMatch = absoluteNextMatchByTeam.get(match.away_team_id) === match.id;
+
             const hasOddsRecords = match.matchOdds.length > 0;
 
             if (!hasOddsRecords) {
                 const matchHasHighStreak = allStreaks.some(str =>
                     str.season_id === match.season_id &&
-                    [match.home_team_id, match.away_team_id].includes(str.team_id) &&
-                    str.streak_length >= 3
+                    str.streak_length >= 3 &&
+                    ((isHomeTeamsNextMatch && str.team_id === match.home_team_id) ||
+                        (isAwayTeamsNextMatch && str.team_id === match.away_team_id))
                 );
                 if (!matchHasHighStreak) return null;
             }
@@ -405,8 +456,18 @@ const teamsServices = {
                     };
                 };
 
-                const homeTeamData = getTeamDataFromMemory(match.home_team_id);
-                const awayTeamData = getTeamDataFromMemory(match.away_team_id);
+                // Don't attach a team's streak/average to this match unless it's
+                // actually that team's own next fixture - see isHomeTeamsNextMatch/
+                // isAwayTeamsNextMatch above. Otherwise a team whose real next match
+                // is fixture #1497 would also incorrectly surface a streak insight
+                // against fixture #1512 just because it happens to be their opponent's
+                // next match, double-counting the same team+market pair.
+                const homeTeamData = isHomeTeamsNextMatch
+                    ? getTeamDataFromMemory(match.home_team_id)
+                    : { avg_value: 0, suggestedValue: 0.5, streak: null };
+                const awayTeamData = isAwayTeamsNextMatch
+                    ? getTeamDataFromMemory(match.away_team_id)
+                    : { avg_value: 0, suggestedValue: 0.5, streak: null };
 
                 const currentMarketOdds = oddsByMarket[rawSlug] || [];
                 const homeStreakLen = homeTeamData.streak?.length || 0;
@@ -445,6 +506,12 @@ const teamsServices = {
         return filteredResult;
     }
 };
+
+// Exposed so other services (e.g. main/streaks.service.js) that need to resolve
+// MatchOdds against these same raw provider slugs don't have to duplicate/drift
+// from this mapping.
+teamsServices.SLUG_MAP = SLUG_MAP;
+
 module.exports = teamsServices;
 
 
