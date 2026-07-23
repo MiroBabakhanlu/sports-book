@@ -360,8 +360,9 @@ export function renderInsightsDashboard(insights) {
         'corners-over-under': 'TOTAL CORNERS',
         'goals-overunder': 'TOTAL GOALS',
         'red-cards-over-under': 'TOTAL RED CARDS',
-        'yellow-cards-over-under': 'TOTAL YELLOW CARDS ',
-        'team-yellow-cards': 'TEAM YELLOW CARDS',
+        'yellow-overunder': 'TOTAL YELLOW CARDS',
+        'home-team-yellow-cards': 'TEAM YELLOW CARDS',
+        'away-team-yellow-cards': 'TEAM YELLOW CARDS',
         'team-red-cards': 'TEAM RED CARDS',
     };
 

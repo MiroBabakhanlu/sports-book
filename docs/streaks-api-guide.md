@@ -202,6 +202,44 @@ Everything from the `Streak` object above, plus:
 
 ---
 
+## `GET /matchup/{streakId}` — both teams' averages, streak, and full match history
+
+Use this for an on-click "matchup" view — `GET /streaks/{id}` only covers evidence for the one team/market the streak is about; this gives you both sides so you can build a full comparison page for the market in question.
+
+Path param `id` is the same `streak_921`-style id — same `400`/`404` rules as `/streaks/{id}`.
+
+### Response
+
+```json
+{
+  "streak_id": "streak_763",
+  "market": { "key": "team_yellow_cards", "label": "Team Yellow Cards" },
+  "match": { /* same match object shape as GET /streaks/{id} */ },
+  "home": {
+    "team": { "id": "team_100", "name": "Manta FC", "short": "MF", "logo_url": "..." },
+    "season_avg": 2.55,
+    "streak": { "count": 9, "direction": "below" },
+    "matches": [
+      { "match_id": "match_1508", "date": "2026-07-19", "venue": "away", "opponent": { "id": "team_98", "name": "Guayaquil City FC" }, "score": "1-0", "value": 1 }
+    ]
+  },
+  "away": { /* same shape as home */ }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `market` | The one market this matchup is scoped to (whichever market the streak was about) |
+| `match` | The specific upcoming/live fixture this matchup pertains to |
+| `home` / `away` | Full breakdown for each side, see below |
+| `<side>.season_avg` | That team's season average for `market`, or `null` if not yet computed |
+| `<side>.streak` | That team's current streak for `market` (`count`, `direction`), or `null` if they don't have one — **note this can be a streak shorter than 3**, since it's shown for context here rather than filtered like the main `/streaks` listing |
+| `<side>.matches` | Every **finished** match this season, **most recent first**, with the raw stat `value` for `market` in that specific match, who the `opponent` was, `venue` (home/away for that match), and the final `score` |
+
+This is a heavier response than the other endpoints (full-season match history for two teams) — fetch it only when the user actually opens the matchup view, not alongside the list/summary calls.
+
+---
+
 ## Logging a click (optional, fire-and-forget)
 
 If you want click analytics on odds chips, `POST /clicks` accepts:

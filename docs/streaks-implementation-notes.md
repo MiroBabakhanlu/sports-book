@@ -99,6 +99,18 @@ const historyLimit = Math.min(Math.max(base.streak_count, 3), 20);
 
 We pull up to `streak_count` historical matches, floored at 3 and capped at 20 — so a 45-match streak still only returns the most recent 20 (keeps the payload bounded), and even a fresh 3-match streak gets at least 3 data points. Only **finished** matches count (`FT`/`AET`/`PEN`) — the pipeline pre-creates stat rows for not-yet-played fixtures too, which would otherwise leak in as bogus zero-value history. Returned oldest → newest (reversed from the DB's newest-first query) to match a natural left-to-right dot-trail UI.
 
+## `GET /matchup/{streakId}` — why it exists separately from `/streaks/{id}`
+
+`/streaks/{id}` was scoped deliberately narrow: it's evidence for *one* prediction (one team, one market), not a general matchup/comparison page. Once we needed a "click a streak, see both teams' full picture" view (mirroring what the internal admin dashboard already shows via `teams.service.js`'s `getTeamDashboard`), that was a genuinely different shape of data, so it's a new endpoint rather than bolting more fields onto `/streaks/{id}`.
+
+Implementation-wise it reuses rather than reinvents:
+- **Resolving the streak → match/teams**: pulled a shared `resolveCandidateByStreakId` helper out of `streaks.service.js` (it was inline in `getStreakById` before) so both endpoints agree on what "streak not found" means and share the same 60s candidate cache — no duplicated match-resolution logic.
+- **Per-team stats**: same three tables `getTeamDashboard` already uses (`TeamSeasonAverage`, `TeamStreak`, `MatchTeamStat`), just queried for **one market** across **both teams** instead of all 8 markets for one team. `MatchTeamStat` already stores the pre-computed raw value per team per match per market (goals/cards/corners), so there's no manual home/away score math here — same pattern `getStreakById`'s own `history` field already uses.
+
+One deliberate difference from `/streaks/{id}`'s `history`: `matchup`'s per-team `matches` list is **not capped at 20** — since this is meant to be the "full picture" view, it returns every finished match in the season. Worth keeping an eye on payload size if a competition runs a very long season, but not a concern at current scale.
+
+Also: a team's `streak` field here can show a streak shorter than 3 (the floor that keeps something off `/streaks` entirely) — this endpoint isn't filtering candidates, it's just reporting whatever `TeamStreak` row exists for context, so the frontend decides what's worth badging.
+
 ## Market scope: why only 8 markets
 
 The original PDF spec's market list didn't match what this codebase actually computes streaks for (it included 1st/2nd-half goals and BTTS, which we have no `TeamStreak`/`TeamSeasonAverage` data for at all). Per direction I was given, I used the canonical 8 markets already tracked everywhere else in the app instead of trying to force the PDF's list:

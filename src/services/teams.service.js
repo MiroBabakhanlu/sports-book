@@ -7,12 +7,13 @@ const SLUG_MAP = {
     'corners-over-under': 'total-corner-kicks',
     'goals-overunder': 'total-goals',
     'red-cards-over-under': 'total-red-cards',
-    'yellow-cards-over-under': 'total-yellow-cards',
+    'yellow-overunder': 'total-yellow-cards',
     'total-home': 'team-goals',
     'total-away': 'team-goals',
     'home-corners-overunder': 'team-corner-kicks',
     'away-corners-overunder': 'team-corner-kicks',
-    'team-yellow-cards': 'team-yellow-cards',
+    'home-team-yellow-cards': 'team-yellow-cards',
+    'away-team-yellow-cards': 'team-yellow-cards',
     'team-red-cards': 'team-red-cards'
 };
 

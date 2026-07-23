@@ -558,7 +558,12 @@ const streaksService = {
         };
     },
 
-    getStreakById: async (id) => {
+    // Shared by getStreakById and matchup.service.js - both need to resolve a
+    // "streak_<id>" string down to its underlying candidate (with the internal
+    // _teamId/_marketId/_matchId bookkeeping still attached, unlike the public
+    // Streak shape). Keeping this in one place means both endpoints agree on
+    // what "streak not found" means and share the same 60s candidate cache.
+    resolveCandidateByStreakId: async (id) => {
         const parsed = /^streak_(\d+)$/.exec(id || '');
         if (!parsed) {
             throw new AppError('Invalid streak id', 400);
@@ -570,6 +575,11 @@ const streaksService = {
         if (!base) {
             throw new AppError('Streak not found', 404);
         }
+        return base;
+    },
+
+    getStreakById: async (id) => {
+        const base = await streaksService.resolveCandidateByStreakId(id);
 
         const direction = base.prediction.direction;
         const threshold = base.prediction.threshold;
