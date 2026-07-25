@@ -58,6 +58,7 @@ model Season {
   matches            Match[]
   teamSeasonAverages TeamSeasonAverage[]
   teamStreaks        TeamStreak[]
+  teamStandings      TeamStanding[]
 
   @@unique([league_id, id_api], name: "id_api_league_id") //new
   @@map("SEASON")
@@ -81,6 +82,7 @@ model Team {
   matchTeamStats     MatchTeamStat[]
   teamSeasonAverages TeamSeasonAverage[]
   teamStreaks        TeamStreak[]
+  teamStandings      TeamStanding[]
 
   @@map("TEAM")
 }
@@ -229,6 +231,28 @@ model TeamStreak {
 
   @@unique([team_id, season_id, market_id], name: "team_id_season_id_market_id")
   @@map("TEAM_STREAK")
+}
+
+model TeamStanding {
+  id              Int      @id @default(autoincrement())
+  team_id         Int
+  season_id       Int
+  position        Int
+  played          Int
+  won             Int
+  drawn           Int
+  lost            Int
+  goals_for       Int
+  goals_against   Int
+  goal_difference Int
+  points          Int
+  recalculated_at DateTime @updatedAt
+
+  team   Team   @relation(fields: [team_id], references: [id])
+  season Season @relation(fields: [season_id], references: [id])
+
+  @@unique([team_id, season_id], name: "team_id_season_id")
+  @@map("TEAM_STANDING")
 }
 
 model ClickLog {

@@ -33,7 +33,9 @@ export function renderTeamDashboard(data, teamId, teamName) {
             team_reds: m.home_team_id === teamId ? m.home_reds : m.away_reds,
             total_reds: (m.home_reds !== null && m.away_reds !== null) ? m.home_reds + m.away_reds : null,
             team_corners: m.home_team_id === teamId ? m.home_corners : m.away_corners,
-            total_corners: (m.home_corners !== null && m.away_corners !== null) ? m.home_corners + m.away_corners : null
+            total_corners: (m.home_corners !== null && m.away_corners !== null) ? m.home_corners + m.away_corners : null,
+            total_goals_1st_half: m.total_1st_half,
+            total_goals_2nd_half: m.total_2nd_half
         };
     });
 
@@ -364,6 +366,8 @@ export function renderInsightsDashboard(insights) {
         'home-team-yellow-cards': 'TEAM YELLOW CARDS',
         'away-team-yellow-cards': 'TEAM YELLOW CARDS',
         'team-red-cards': 'TEAM RED CARDS',
+        'goals-overunder-first-half': 'TOTAL GOALS 1ST HALF',
+        'goals-overunder-second-half': 'TOTAL GOALS 2ND HALF',
     };
 
     const getMarketLabel = (slug) =>
@@ -1265,6 +1269,12 @@ export function openTableView() {
                     break;
                 case 'total-corner-kicks':
                     rawValue = match.total_corners ?? '-';
+                    break;
+                case 'total-goals-1st-half':
+                    rawValue = match.total_goals_1st_half ?? '-';
+                    break;
+                case 'total-goals-2nd-half':
+                    rawValue = match.total_goals_2nd_half ?? '-';
                     break;
                 default:
                     rawValue = '-';

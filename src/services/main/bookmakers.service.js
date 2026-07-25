@@ -8,10 +8,12 @@ const bookmakersServices = {
             throw new AppError("region is required", 400);
         }
 
-        // Regional bookmaker
+        // Regional bookmaker - region_code is matched case-insensitively since
+        // callers (geo-IP libraries, etc.) don't reliably send ISO codes in the
+        // same case they're stored in (e.g. "af" vs "AF").
         const regionalMatch = await prisma.bookmakerRegion.findFirst({
             where: {
-                region_code: region,
+                region_code: { equals: region, mode: 'insensitive' },
                 is_active: true,
                 bookmaker: {
                     is_active: true

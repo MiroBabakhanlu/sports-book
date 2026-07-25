@@ -51,10 +51,10 @@ const SLUG_MAP = teamsService.SLUG_MAP;
 // ─────────────────────────────────────────────────────────────────────────
 // The AssuredBets spec (assuredbets-api-requirements.pdf) lists a market
 // list for GET /streaks that does not match what this codebase actually
-// tracks (it mixes in 1st/2nd-half goals and btts, which we never compute
-// TeamStreak/TeamSeasonAverage rows for). Per explicit instruction, the
-// canonical 8 markets already used everywhere else in the app (see
-// STREAK_CHECK_SLUGS in teams.service.js) are the source of truth here.
+// tracks (it mixes in btts, which we never compute TeamStreak/
+// TeamSeasonAverage rows for). Per explicit instruction, the canonical
+// markets already used everywhere else in the app (see STREAK_CHECK_SLUGS
+// in teams.service.js) are the source of truth here.
 // ─────────────────────────────────────────────────────────────────────────
 const MARKET_MAP = {
     'team-goals': { key: 'team_goals', label: 'Team Goals' },
@@ -64,7 +64,9 @@ const MARKET_MAP = {
     'team-red-cards': { key: 'team_red_cards', label: 'Team Red Cards' },
     'total-red-cards': { key: 'total_red_cards', label: 'Total Red Cards' },
     'team-corner-kicks': { key: 'team_corners', label: 'Team Corners' },
-    'total-corner-kicks': { key: 'total_corners', label: 'Total Corners' }
+    'total-corner-kicks': { key: 'total_corners', label: 'Total Corners' },
+    'total-goals-1st-half': { key: 'total_goals_1st_half', label: 'Total Goals 1st Half' },
+    'total-goals-2nd-half': { key: 'total_goals_2nd_half', label: 'Total Goals 2nd Half' }
 };
 const DB_MARKET_SLUGS = Object.keys(MARKET_MAP);
 const PUBLIC_MARKET_KEYS = Object.values(MARKET_MAP).map(m => m.key);
@@ -366,7 +368,8 @@ async function buildRawCandidates() {
             _teamId: ts.team_id,
             _marketId: ts.market_id,
             _rawMarketId: rawMarketId,
-            _matchId: match.id
+            _matchId: match.id,
+            _seasonId: ts.season_id
         });
     }
 
@@ -384,7 +387,7 @@ async function getRawCandidates() {
 }
 
 function stripInternal(item) {
-    const { _kickoffAt, _teamStreakId, _teamId, _marketId, _rawMarketId, _matchId, ...rest } = item;
+    const { _kickoffAt, _teamStreakId, _teamId, _marketId, _rawMarketId, _matchId, _seasonId, ...rest } = item;
     return rest;
 }
 
@@ -469,10 +472,12 @@ function sortCandidates(list, sort) {
             sorted.sort((a, b) => a.confidence - b.confidence); // lowest confidence first
             break;
         case 'odds_desc':
-            sorted.sort((a, b) => (b.odds.recommended?.value ?? 0) - (a.odds.recommended?.value ?? 0)); // highest odds first
+            // Streaks with no odds yet are still included, just always sorted last -
+            // -Infinity guarantees that regardless of direction, matching odds_asc below.
+            sorted.sort((a, b) => (b.odds.recommended?.value ?? -Infinity) - (a.odds.recommended?.value ?? -Infinity)); // highest odds first
             break;
         case 'odds_asc':
-            sorted.sort((a, b) => (a.odds.recommended?.value ?? 0) - (b.odds.recommended?.value ?? 0)); // lowest odds first
+            sorted.sort((a, b) => (a.odds.recommended?.value ?? Infinity) - (b.odds.recommended?.value ?? Infinity)); // lowest odds first
             break;
         case 'kickoff_asc':
             sorted.sort((a, b) => a._kickoffAt - b._kickoffAt); // soonest match first
@@ -578,55 +583,13 @@ const streaksService = {
         return base;
     },
 
-    getStreakById: async (id) => {
-        const base = await streaksService.resolveCandidateByStreakId(id);
-
+    // Shared by getStreakById (all_odds) and matchup.service.js (availableBookmakers,
+    // which just strips the `value` field) - both need "every active bookmaker's price
+    // for this exact prediction line", so the DB query and bookmaker-logo lookup live
+    // in one place instead of two.
+    getAllOddsForStreak: async (base) => {
         const direction = base.prediction.direction;
         const threshold = base.prediction.threshold;
-        const historyLimit = Math.min(Math.max(base.streak_count, 3), 20);
-
-        const statRows = await prisma.matchTeamStat.findMany({
-            where: {
-                team_id: base._teamId,
-                market_id: base._marketId,
-                // Only actually-played matches - the pipeline also creates MatchTeamStat
-                // rows ahead of time for not-yet-played fixtures, which would otherwise
-                // surface as bogus zero-value "history" entries dated in the future.
-                match: { status: { in: ['FT', 'AET', 'PEN'] } }
-            },
-            orderBy: { match: { kickoff_at: 'desc' } },
-            take: historyLimit,
-            select: {
-                value: true,
-                match: { select: { id: true, kickoff_at: true } }
-            }
-        });
-
-        const history = statRows
-            .filter(row => row.match?.kickoff_at)
-            .map(row => {
-                const value = Number(row.value);
-                const isHit = direction === 'over' ? value > threshold : value < threshold;
-                return {
-                    match_id: `match_${row.match.id}`,
-                    date: row.match.kickoff_at.toISOString().slice(0, 10),
-                    result: isHit ? 'hit' : 'miss',
-                    value
-                };
-            })
-            .reverse(); // oldest -> newest, matching the PDF's chronological dot-trail example
-
-        const sampleSize = history.length;
-        const hits = history.filter(h => h.result === 'hit').length;
-        const hitRate = sampleSize ? Math.round((hits / sampleSize) * 100) / 100 : 0;
-
-        let stdDeviation = 0;
-        if (sampleSize > 1) {
-            const values = history.map(h => h.value);
-            const mean = values.reduce((s, v) => s + v, 0) / values.length;
-            const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / (values.length - 1);
-            stdDeviation = Math.round(Math.sqrt(variance) * 100) / 100;
-        }
 
         // base._rawMarketId can be null (e.g. no raw provider slug resolves for this
         // canonical market/side combo yet) - Prisma throws PrismaClientValidationError
@@ -653,7 +616,7 @@ const streaksService = {
             })
             : null;
 
-        const allOdds = (matchRow?.matchOdds || [])
+        return (matchRow?.matchOdds || [])
             .map(o => {
                 const name = o.bookmaker?.name || 'unknown';
                 return {
@@ -665,6 +628,102 @@ const streaksService = {
                 };
             })
             .sort((a, b) => b.value - a.value);
+    },
+
+    // Shared by matchup.service.js's similarStreaks widget - other active streaks in
+    // the same market, ranked by the same "top" composite (confidence desc, then
+    // streak_count desc) already used as the default /streaks sort, excluding the
+    // streak being viewed. otherSimilarStreakCounts lets the frontend show "+N more"
+    // without a second paginated request.
+    //
+    // Deliberately NOT the full public Streak shape - this widget only ever renders
+    // both team names/logos, the streak count, market + direction/threshold, and
+    // confidence, so returning odds/match/status/prediction text etc. would just be
+    // dead weight on every card in the list.
+    getSimilarStreaks: async (base, limit = 5) => {
+        const raw = await getRawCandidates();
+        const sameMarket = raw.filter(item =>
+            item.market.key === base.market.key && item._teamStreakId !== base._teamStreakId
+        );
+        const sorted = sortCandidates(sameMarket, 'top');
+        const items = sorted.slice(0, limit).map(item => ({
+            id: item.id,
+            streak_count: item.streak_count,
+            confidence: item.confidence,
+            market: { key: item.market.key, label: item.market.label },
+            prediction: { direction: item.prediction.direction, threshold: item.prediction.threshold },
+            home: { name: item.match.home.name, logo_url: item.match.home.logo_url },
+            away: { name: item.match.away.name, logo_url: item.match.away.logo_url }
+        }));
+
+        return {
+            items,
+            otherSimilarStreakCounts: Math.max(0, sameMarket.length - items.length)
+        };
+    },
+
+    getStreakById: async (id) => {
+        const base = await streaksService.resolveCandidateByStreakId(id);
+
+        const direction = base.prediction.direction;
+        const threshold = base.prediction.threshold;
+
+        // Uncapped - sample_size/hit_rate/std_deviation/history are all meant to
+        // describe every game this team has actually played this season for this
+        // market, not just the games inside the current streak's own run (see
+        // streaks-implementation-notes.md for why capping to streak_count made
+        // hit_rate mathematically unable to be anything but 0% or 100%).
+        const statRows = await prisma.matchTeamStat.findMany({
+            where: {
+                team_id: base._teamId,
+                market_id: base._marketId,
+                // Only actually-played matches, and only this season - the pipeline
+                // also creates MatchTeamStat rows ahead of time for not-yet-played
+                // fixtures (which would otherwise surface as bogus zero-value entries
+                // dated in the future), and MatchTeamStat has no season_id column of
+                // its own, so this goes through the match relation.
+                match: { status: { in: ['FT', 'AET', 'PEN'] }, season_id: base._seasonId }
+            },
+            orderBy: { match: { kickoff_at: 'desc' } },
+            select: {
+                value: true,
+                match: { select: { id: true, kickoff_at: true } }
+            }
+        });
+
+        const history = statRows
+            .filter(row => row.match?.kickoff_at)
+            .map(row => {
+                const value = Number(row.value);
+                const isHit = direction === 'over' ? value > threshold : value < threshold;
+                return {
+                    match_id: `match_${row.match.id}`,
+                    date: row.match.kickoff_at.toISOString().slice(0, 10),
+                    result: isHit ? 'hit' : 'miss',
+                    value
+                };
+            })
+            .reverse(); // oldest -> newest, matching the PDF's chronological dot-trail example
+
+        const sampleSize = history.length;
+        const hits = history.filter(h => h.result === 'hit').length;
+        // Percentage (0-100), matching the `confidence` field's convention elsewhere
+        // in this API - not a 0-1 fraction.
+        const hitRate = sampleSize ? Math.round((hits / sampleSize) * 100) : 0;
+
+        // Population standard deviation (divide by n), not sample std dev (n-1 /
+        // Bessel's correction) - sampleSize is now every game this team has played
+        // this season for this market, i.e. the actual population, not a sample
+        // being used to estimate some larger unknown population.
+        let stdDeviation = 0;
+        if (sampleSize > 0) {
+            const values = history.map(h => h.value);
+            const mean = values.reduce((s, v) => s + v, 0) / values.length;
+            const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
+            stdDeviation = Math.round(Math.sqrt(variance) * 100) / 100;
+        }
+
+        const allOdds = await streaksService.getAllOddsForStreak(base);
 
         return {
             ...stripInternal(base),

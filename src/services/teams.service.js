@@ -14,7 +14,9 @@ const SLUG_MAP = {
     'away-corners-overunder': 'team-corner-kicks',
     'home-team-yellow-cards': 'team-yellow-cards',
     'away-team-yellow-cards': 'team-yellow-cards',
-    'team-red-cards': 'team-red-cards'
+    'team-red-cards': 'team-red-cards',
+    'goals-overunder-first-half': 'total-goals-1st-half',
+    'goals-overunder-second-half': 'total-goals-2nd-half'
 };
 
 const STREAK_CHECK_SLUGS = [
@@ -25,7 +27,9 @@ const STREAK_CHECK_SLUGS = [
     'team-red-cards',
     'total-red-cards',
     'team-corner-kicks',
-    'total-corner-kicks'
+    'total-corner-kicks',
+    'total-goals-1st-half',
+    'total-goals-2nd-half'
 ];
 
 const teamsServices = {
@@ -75,8 +79,13 @@ const teamsServices = {
         const tId = parseInt(teamId, 10);
         const sId = parseInt(seasonId, 10);
 
+        // Scoped to STREAK_CHECK_SLUGS only - this powers the admin streak-analysis
+        // views (Full Market table, team-avgs cards, matchup comparison modal), not
+        // the Team Statistics widget's comparison-only markets (team-goals-conceded,
+        // team-possession, etc.), which never get a TeamStreak row and would just
+        // show up here as empty "nc" rows with no matchday data otherwise.
         const averages = await prisma.teamSeasonAverage.findMany({
-            where: { team_id: tId, season_id: sId },
+            where: { team_id: tId, season_id: sId, market: { slug: { in: STREAK_CHECK_SLUGS } } },
             include: { market: true }
         });
 
@@ -132,7 +141,13 @@ const teamsServices = {
                 home_reds: getStatValue('team-red-cards', 'home'),
                 away_reds: getStatValue('team-red-cards', 'away'),
                 home_corners: getStatValue('team-corner-kicks', 'home'),
-                away_corners: getStatValue('team-corner-kicks', 'away')
+                away_corners: getStatValue('team-corner-kicks', 'away'),
+                // Total markets store the same match-wide value under both teams'
+                // rows (side-tagged) - unlike team-goals/total-goals there's no raw
+                // halftime score on the Match row itself to recompute from below, so
+                // this reads straight from the already-computed MatchTeamStat value.
+                total_1st_half: getStatValue('total-goals-1st-half', 'home'),
+                total_2nd_half: getStatValue('total-goals-2nd-half', 'home')
             };
         });
 
@@ -175,6 +190,12 @@ const teamsServices = {
                         break;
                     case 'total-corner-kicks':
                         matchValue = m.home_corners + m.away_corners;
+                        break;
+                    case 'total-goals-1st-half':
+                        matchValue = m.total_1st_half;
+                        break;
+                    case 'total-goals-2nd-half':
+                        matchValue = m.total_2nd_half;
                         break;
                     default:
                         matchValue = 0;

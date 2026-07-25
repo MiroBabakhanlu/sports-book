@@ -16,6 +16,7 @@ const leaguesRoutes = require('./src/routes/main/leagues.routes');
 const streaksRoutes = require('./src/routes/main/streaks.routes');
 const clicksRoutes = require('./src/routes/main/clicks.routes');
 const matchupRoutes = require('./src/routes/main/matchup.routes');
+const standingsRoutes = require('./src/routes/main/standings.routes');
 
 const { runPipelines } = require('./pop-db');
 const { runOddsPipeline } = require('./odds-pipeline');
@@ -114,6 +115,7 @@ app.use('/api/leagues', authMiddleware, leaguesRoutes)
 app.use('/api/streaks', authMiddleware, streaksRoutes)
 app.use('/api/clicks', authMiddleware, clicksRoutes)
 app.use('/api/matchup', authMiddleware, matchupRoutes)
+app.use('/api/standings', authMiddleware, standingsRoutes)
 
 // Swagger UI for the main-site endpoints above. Docs live as @openapi JSDoc
 // blocks next to each route (src/routes/main/*.routes.js) so they can't drift
@@ -127,7 +129,7 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        // runPipelines(targetLeagues)
+        runPipelines(targetLeagues)
 
         // runOddsPipeline(activeLeagues);
         // startStreakWorker(targetLeagues);

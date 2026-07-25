@@ -114,6 +114,73 @@ async function generateSeasonAverages(tx, seasonId) {
     console.log('team season averages successfully computed and saved');
 }
 
+// 2b. League table (W/D/L/points/goal difference) for a season - computed straight
+// from Match rows (home_score/away_score/status), not MatchTeamStat, since standings
+// don't need anything from the stats pipeline. One TeamStanding row per team,
+// ranked points desc -> goal difference desc -> goals for desc.
+async function generateStandings(tx, seasonId) {
+    const matches = await tx.match.findMany({
+        where: {
+            season_id: seasonId,
+            status: { in: ['FT', 'AET', 'PEN'] }
+        },
+        select: { home_team_id: true, away_team_id: true, home_score: true, away_score: true }
+    });
+
+    const table = {};
+    const ensureTeam = (teamId) => {
+        if (!table[teamId]) {
+            table[teamId] = { played: 0, won: 0, drawn: 0, lost: 0, goals_for: 0, goals_against: 0 };
+        }
+        return table[teamId];
+    };
+
+    for (const m of matches) {
+        if (m.home_score === null || m.away_score === null) continue;
+
+        const home = ensureTeam(m.home_team_id);
+        const away = ensureTeam(m.away_team_id);
+
+        home.played++; away.played++;
+        home.goals_for += m.home_score; home.goals_against += m.away_score;
+        away.goals_for += m.away_score; away.goals_against += m.home_score;
+
+        if (m.home_score > m.away_score) { home.won++; away.lost++; }
+        else if (m.away_score > m.home_score) { away.won++; home.lost++; }
+        else { home.drawn++; away.drawn++; }
+    }
+
+    const ranked = Object.entries(table)
+        .map(([teamId, t]) => ({
+            team_id: Number(teamId),
+            ...t,
+            goal_difference: t.goals_for - t.goals_against,
+            points: t.won * 3 + t.drawn
+        }))
+        .sort((a, b) => (b.points - a.points) || (b.won - a.won) || (b.goal_difference - a.goal_difference) || (b.goals_for - a.goals_for));
+
+    for (let i = 0; i < ranked.length; i++) {
+        const row = ranked[i];
+        const data = {
+            position: i + 1,
+            played: row.played,
+            won: row.won,
+            drawn: row.drawn,
+            lost: row.lost,
+            goals_for: row.goals_for,
+            goals_against: row.goals_against,
+            goal_difference: row.goal_difference,
+            points: row.points
+        };
+        await tx.teamStanding.upsert({
+            where: { team_id_season_id: { team_id: row.team_id, season_id: seasonId } },
+            update: data,
+            create: { team_id: row.team_id, season_id: seasonId, ...data }
+        });
+    }
+    console.log('team standings successfully computed and saved');
+}
+
 // 3. Isolated function to process a single league entirely within a Prisma transaction
 async function processLeague(leagueId, seasonYear) {
     // Increased timeout to 5 minutes (300,000ms) to accommodate Axios delays inside the transaction
@@ -224,10 +291,13 @@ async function processLeague(leagueId, seasonYear) {
             'team-yellow-cards', 'total-yellow-cards',
             'team-red-cards', 'total-red-cards',
             'team-corner-kicks', 'total-corner-kicks',
+            'total-goals-1st-half', 'total-goals-2nd-half',
             // conceded
-            // 'team-goals-conceded',
+            'team-goals-conceded',
             // 'team-corner-kicks-conceded',
             // 'team-yellow-cards-conceded'
+            // Team Statistics widget - not streak-eligible, comparison stats only
+            'team-goals-1st-half', 'team-goals-2nd-half', 'team-possession', 'team-shots', 'team-clean-sheets'
         ];
 
         const dbMarkets = await tx.market.findMany({
@@ -327,12 +397,22 @@ async function processLeague(leagueId, seasonYear) {
 
                 const homeGoals = f.goals.home ?? 0;
                 const awayGoals = f.goals.away ?? 0;
+                const homeGoalsHT = f.score?.halftime?.home ?? 0;
+                const awayGoalsHT = f.score?.halftime?.away ?? 0;
+                const homeGoals2H = homeGoals - homeGoalsHT;
+                const awayGoals2H = awayGoals - awayGoalsHT;
                 const homeYellows = getRawStatValue(homeStatsArray, 'Yellow Cards');
                 const awayYellows = getRawStatValue(awayStatsArray, 'Yellow Cards');
                 const homeReds = getRawStatValue(homeStatsArray, 'Red Cards');
                 const awayReds = getRawStatValue(awayStatsArray, 'Red Cards');
                 const homeCorners = getRawStatValue(homeStatsArray, 'Corner Kicks');
                 const awayCorners = getRawStatValue(awayStatsArray, 'Corner Kicks');
+                // parseInt("46%") -> 46, stops at the first non-numeric char, so no
+                // separate % stripping needed - same getRawStatValue as everything else.
+                const homePossession = getRawStatValue(homeStatsArray, 'Ball Possession');
+                const awayPossession = getRawStatValue(awayStatsArray, 'Ball Possession');
+                const homeShots = getRawStatValue(homeStatsArray, 'Total Shots');
+                const awayShots = getRawStatValue(awayStatsArray, 'Total Shots');
 
                 for (const market of dbMarkets) {
                     let finalValue = 0;
@@ -373,11 +453,21 @@ async function processLeague(leagueId, seasonYear) {
                         await upsertMatchStat(tx, match.id, homeTeam.id, market.id, finalValue, 'home');
                         await upsertMatchStat(tx, match.id, awayTeam.id, market.id, finalValue, 'away');
                     }
-                    // else if (market.slug === 'team-goals-conceded') {
-                    //     // home CONCEDED = what away scored; away CONCEDED = what home scored
-                    //     await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayGoals, 'home');
-                    //     await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeGoals, 'away');
-                    // }
+                    else if (market.slug === 'total-goals-1st-half') {
+                        finalValue = homeGoalsHT + awayGoalsHT;
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, finalValue, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, finalValue, 'away');
+                    }
+                    else if (market.slug === 'total-goals-2nd-half') {
+                        finalValue = homeGoals2H + awayGoals2H;
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, finalValue, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, finalValue, 'away');
+                    }
+                    else if (market.slug === 'team-goals-conceded') {
+                        // home CONCEDED = what away scored; away CONCEDED = what home scored
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayGoals, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeGoals, 'away');
+                    }
                     // else if (market.slug === 'team-corner-kicks-conceded') {
                     //     await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayCorners, 'home');
                     //     await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeCorners, 'away');
@@ -386,12 +476,37 @@ async function processLeague(leagueId, seasonYear) {
                     //     await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayYellows, 'home');
                     //     await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeYellows, 'away');
                     // }
+                    else if (market.slug === 'team-goals-1st-half') {
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, homeGoalsHT, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, awayGoalsHT, 'away');
+                    }
+                    else if (market.slug === 'team-goals-2nd-half') {
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, homeGoals2H, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, awayGoals2H, 'away');
+                    }
+                    else if (market.slug === 'team-possession') {
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, homePossession, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, awayPossession, 'away');
+                    }
+                    else if (market.slug === 'team-shots') {
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, homeShots, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, awayShots, 'away');
+                    }
+                    else if (market.slug === 'team-clean-sheets') {
+                        // Per-match 1/0, not a count - generateSeasonAverages() treats
+                        // this exactly like every other market (sum/count), so avg_value
+                        // ends up being the clean-sheet RATE. matchup.service.js turns
+                        // that back into a count (rate * matches_played) at read time.
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayGoals === 0 ? 1 : 0, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeGoals === 0 ? 1 : 0, 'away');
+                    }
                 }
             }
         }
         console.log('match events loaded to database');
 
         await generateSeasonAverages(tx, dbSeason.id);
+        await generateStandings(tx, dbSeason.id);
 
         console.log(`END FOR league ${leagueId}!`);
     }, { timeout: 300000 }); // 5 minutes max wait

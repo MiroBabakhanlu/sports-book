@@ -5,6 +5,7 @@ const TARGET_SLUGS = [
     'team-yellow-cards', 'total-yellow-cards',
     'team-red-cards', 'total-red-cards',
     'team-corner-kicks', 'total-corner-kicks',
+    'total-goals-1st-half', 'total-goals-2nd-half',
     // conceded
     // 'team-goals-conceded',
     // 'team-corner-kicks-conceded',

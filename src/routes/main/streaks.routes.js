@@ -119,7 +119,7 @@ const route = express.Router();
  *         schema: { type: number }
  *       - in: query
  *         name: markets
- *         description: Comma-separated market keys (team_goals, total_goals, team_yellow_cards, total_yellow_cards, team_red_cards, total_red_cards, team_corners, total_corners)
+ *         description: Comma-separated market keys (team_goals, total_goals, team_yellow_cards, total_yellow_cards, team_red_cards, total_red_cards, team_corners, total_corners, total_goals_1st_half, total_goals_2nd_half)
  *         schema: { type: string }
  *       - in: query
  *         name: leagues
@@ -181,7 +181,7 @@ route.get('/summary', streaksController.getSummary);
  *         schema: { type: number }
  *       - in: query
  *         name: markets
- *         description: Comma-separated market keys (team_goals, total_goals, team_yellow_cards, total_yellow_cards, team_red_cards, total_red_cards, team_corners, total_corners)
+ *         description: Comma-separated market keys (team_goals, total_goals, team_yellow_cards, total_yellow_cards, team_red_cards, total_red_cards, team_corners, total_corners, total_goals_1st_half, total_goals_2nd_half)
  *         schema: { type: string }
  *       - in: query
  *         name: leagues

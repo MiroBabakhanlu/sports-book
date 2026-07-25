@@ -105,6 +105,7 @@ const formatBookmakerResponse = (bookmaker) => {
     return {
         id: bookmaker.id,
         label: bookmaker.name.toUpperCase(),
+        logo_url: bookmaker.logo_url || null,
         affiliate_link: bookmaker.affiliate_link || bookmaker.affiliate_url,
         text_color: bookmaker.text_color || "#FFFFFF",
         color_primary: bookmaker.color_primary || "#000000",
