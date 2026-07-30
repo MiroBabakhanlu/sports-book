@@ -107,20 +107,12 @@ const correctLeagues = [
 const app = express();
 dotenv.config();
 
-// Origins allowed to call this API cross-origin (the React client is deployed
-// separately). CORS_ORIGIN can add more, comma-separated, without a code change.
-const allowedOrigins = [
-    'http://localhost:3000',
-    'https://sports-book-client-production.up.railway.app',
-    ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) : []),
-];
-app.use(cors({
-    origin: (origin, callback) => {
-        // No origin (curl, server-to-server, same-origin admin panel) - allow.
-        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error(`Not allowed by CORS: ${origin}`));
-    },
-}));
+// Deliberately NOT applied app-wide: most of /api/admin, /api/teams,
+// /api/bookmaker are only ever called same-origin by the admin panel this
+// same server serves from public/, and gating those too would reject the
+// admin panel's own requests for no reason. Only applied to the specific
+// routes that are genuinely called cross-origin (see src/utils/cors.js).
+const { corsOptions } = require('./src/utils/cors');
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -137,12 +129,14 @@ app.use('/api/bookmaker', bookmakerRoutes)
 
 
 //main routes whihc main site will use - guarded by Bearer token auth (authMiddleware)
-app.use('/api/bookmakers', authMiddleware, bookmakersRoutes)
-app.use('/api/leagues', authMiddleware, leaguesRoutes)
-app.use('/api/streaks', authMiddleware, streaksRoutes)
-app.use('/api/clicks', authMiddleware, clicksRoutes)
-app.use('/api/matchup', authMiddleware, matchupRoutes)
-app.use('/api/standings', authMiddleware, standingsRoutes)
+// cors() here (not app-wide) since these are the only routes the separately-
+// hosted client actually calls cross-origin.
+app.use('/api/bookmakers', cors(corsOptions), authMiddleware, bookmakersRoutes)
+app.use('/api/leagues', cors(corsOptions), authMiddleware, leaguesRoutes)
+app.use('/api/streaks', cors(corsOptions), authMiddleware, streaksRoutes)
+app.use('/api/clicks', cors(corsOptions), authMiddleware, clicksRoutes)
+app.use('/api/matchup', cors(corsOptions), authMiddleware, matchupRoutes)
+app.use('/api/standings', cors(corsOptions), authMiddleware, standingsRoutes)
 
 // Swagger UI for the main-site endpoints above. Docs live as @openapi JSDoc
 // blocks next to each route (src/routes/main/*.routes.js) so they can't drift
