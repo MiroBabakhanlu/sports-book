@@ -648,8 +648,14 @@ const renderLeaguesListUI = () => {
     const zonesEnabled = currentFilter === 'all' && !searchQuery;
 
     if (zonesEnabled) {
-        const pinnedList = displayList.filter(l => l.is_pinned);
-        const unpinnedList = displayList.filter(l => !l.is_pinned);
+        // display_order is only meaningful within its own zone (pinned and
+        // unpinned each have their own independent 0-based sequence, set in
+        // handleLeagueDragEnd) - filter() alone preserves leaguesCache's
+        // original fetch order, not this, so a same-zone reorder would
+        // update the data but the render would silently snap back to the
+        // stale order. Sort each zone by its own display_order to fix that.
+        const pinnedList = displayList.filter(l => l.is_pinned).sort((a, b) => a.display_order - b.display_order);
+        const unpinnedList = displayList.filter(l => !l.is_pinned).sort((a, b) => a.display_order - b.display_order);
 
         leagueContainer.innerHTML = `
             <div class="px-4 py-2 bg-amber-50/60 border-b border-amber-100 text-xs font-semibold text-amber-700 uppercase tracking-wider">
