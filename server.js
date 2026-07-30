@@ -93,6 +93,16 @@ const newLeagues = [
 ]
 
 
+const correctLeagues = [
+    [253, 2026],
+    [169, 2026],
+    [71, 2026],
+    [72, 2026],
+    [103, 2026], //good
+    [113, 2026], //good
+];
+
+
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -129,10 +139,10 @@ app.listen(port, async () => {
     try {
         console.log(process.env.DATABASE_URL)
         await connectDB();
-        // runPipelines(targetLeagues)
+        //        runPipelines(correctLeagues)
 
-        // runOddsPipeline(activeLeagues);
-        startStreakWorker(targetLeagues);
+        // runOddsPipeline(correctLeagues);
+        // startStreakWorker(correctLeagues);
 
         // require('./update-db');
     } catch (err) {

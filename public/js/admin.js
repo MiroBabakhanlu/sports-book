@@ -438,7 +438,7 @@ const changeLeaguePinStatus = async (leagueId) => {
 }
 
 
-export const getApiToken = async () => {
+const getApiToken = async () => {
     try {
         const response = await axios.get(`${API_URL}/api-token`);
         return response.data?.data;
@@ -447,6 +447,11 @@ export const getApiToken = async () => {
         return null;
     }
 }
+// admin.js is a plain (non-module) script - render_stats.js is an ES module and
+// needs this, but `export` here would be a syntax error outside a module and
+// break the whole file (which is exactly what happened). Exposing it on window
+// instead keeps admin.js loadable as-is.
+window.getApiToken = getApiToken;
 
 const regenerateApiToken = async () => {
     const response = await axios.post(`${API_URL}/api-token/regenerate`);

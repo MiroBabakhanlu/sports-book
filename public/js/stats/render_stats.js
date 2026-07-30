@@ -5,7 +5,10 @@ import { state } from "./state_stats.js";
 import { fetchTeamDashboardData, fetchSeasonsForLeague, fetchTeamsForSeason, fetchAndRenderUpcomingMatches } from "../main.js";
 
 import { prepareInsightsData, calculateLeagueMarketCounts, getColorForValue, getOddForPrediction } from "./utils_stats.js";
-import { getApiToken } from "../admin.js";
+// admin.js is a plain script, not a module - it can't `export`, so getApiToken is
+// exposed on window instead (see admin.js) and picked up here as a global rather
+// than an ES import.
+const getApiToken = () => window.getApiToken();
 
 const API_TEAM_URL = '/api/teams';
 
