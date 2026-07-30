@@ -1,4 +1,5 @@
 const express = require('express');
+const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
@@ -104,9 +105,25 @@ const correctLeagues = [
 
 
 const app = express();
+dotenv.config();
+
+// Origins allowed to call this API cross-origin (the React client is deployed
+// separately). CORS_ORIGIN can add more, comma-separated, without a code change.
+const allowedOrigins = [
+    'http://localhost:3000',
+    'https://sports-book-client-production.up.railway.app',
+    ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) : []),
+];
+app.use(cors({
+    origin: (origin, callback) => {
+        // No origin (curl, server-to-server, same-origin admin panel) - allow.
+        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error(`Not allowed by CORS: ${origin}`));
+    },
+}));
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-dotenv.config();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname, 'media')));
 

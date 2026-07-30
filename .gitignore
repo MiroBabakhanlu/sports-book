@@ -1,4 +1,7 @@
 node_modules
+# client/ is its own separate git repo (pushed to github.com/MiroBabakhanlu/sports-book-client),
+# not part of this one - ignored here so it doesn't show as an untracked directory.
+client/
 # .env
 
 /src/generated/prisma
