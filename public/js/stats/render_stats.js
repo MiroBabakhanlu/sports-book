@@ -5,6 +5,7 @@ import { state } from "./state_stats.js";
 import { fetchTeamDashboardData, fetchSeasonsForLeague, fetchTeamsForSeason, fetchAndRenderUpcomingMatches } from "../main.js";
 
 import { prepareInsightsData, calculateLeagueMarketCounts, getColorForValue, getOddForPrediction } from "./utils_stats.js";
+import { getApiToken } from "../admin.js";
 
 const API_TEAM_URL = '/api/teams';
 
@@ -967,6 +968,14 @@ export function renderInsightsDashboard(insights) {
                 const market = el.dataset.market;
                 const homeStreak = JSON.parse(el.dataset.homeStreak);
                 const awayStreak = JSON.parse(el.dataset.awayStreak);
+                const isHome = el.dataset.isHome === 'true';
+
+                // This card's prediction belongs to whichever side isHome points at - the
+                // other side can have its own (unrelated, possibly too-short) streak for
+                // the same market, so it's never safe to just prefer home's id.
+                let streakId = isHome ? homeStreak?.id : awayStreak?.id;
+                if (streakId) streakId = `streak_${streakId}`
+                console.log('streakId', streakId);
 
                 const awayTeamData = await fetch(`${API_TEAM_URL}/dashboard?teamId=${awayId}&seasonId=${currentSeasonId}`);
                 const awayTeamResults = await awayTeamData.json();
@@ -974,9 +983,12 @@ export function renderInsightsDashboard(insights) {
                 const homeTeamData = await fetch(`${API_TEAM_URL}/dashboard?teamId=${homeId}&seasonId=${currentSeasonId}`);
                 const homeTeamResults = await homeTeamData.json();
 
-                if (typeof handleStreakPopUp === 'function') {
-                    handleStreakPopUp(homeTeamResults?.data, awayTeamResults?.data);
-                }
+                //old popup
+                // if (typeof handleStreakPopUp === 'function') {
+                //     handleStreakPopUp(homeTeamResults?.data, awayTeamResults?.data);
+                // }
+                openTab('streak-detail-container', streakId)
+
             });
         });
 
@@ -1003,6 +1015,535 @@ export function renderInsightsDashboard(insights) {
 
     window.refreshInsightsDashboard = render;
     render();
+}
+
+function ordinal(n) {
+    if (n === null || n === undefined) return '';
+    const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function renderOddPill(odd) {
+    if (!odd) return `<div class="mt-1 text-[10px] font-bold bg-gray-100 text-gray-400 px-2 py-0.5 rounded inline-block">No odds yet</div>`;
+    // Real bookmaker logo when we have one (same field every other odds widget in the
+    // app already uses); only fall back to a plain text badge when no logo file matched.
+    const bookmakerPart = odd.bookmaker_logo
+        ? `<span class="px-2 py-1.5 bg-white flex items-center"><img src="${odd.bookmaker_logo}" alt="${odd.bookmaker_label}" class="h-7 max-w-[80px] object-contain" /></span>`
+        : `<span class="px-1.5 py-1 text-[10px] font-bold bg-blue-800 text-white">${odd.bookmaker_label}</span>`;
+    return `
+        <div class="inline-flex items-center rounded overflow-hidden text-xs font-bold mt-1 border border-gray-200">
+            <span class="px-2 py-1 text-white bg-blue-600">${odd.value}</span>
+            ${bookmakerPart}
+        </div>
+    `;
+}
+
+// The reference line here is the team's season AVERAGE (chartData.avg), not a
+// betting threshold - a bar is "over"/"under" purely relative to that average.
+function buildChartSVG(chartData) {
+    const { avg, data } = chartData;
+    const values = data.map(d => Number(d.value));
+    const rawMax = Math.max(...values, Number(avg) || 0, 1);
+    const niceMax = Math.ceil(rawMax * 1.15) || 1;
+
+    // Fixed width PER bar (not the whole chart divided by bar count) - every bar and
+    // every date label always gets the same, fully-readable amount of room. The chart
+    // grows wider as more games are shown instead of squeezing existing bars thinner;
+    // the wrapping container scrolls horizontally once it doesn't fit.
+    const barSlot = 42;
+    const barWidth = 22;
+    const height = 190;
+    const padLeft = 34, padRight = 34, padTop = 22, padBottom = 34;
+    const n = data.length || 1;
+    const width = padLeft + padRight + barSlot * n;
+    const chartH = height - padTop - padBottom;
+    const yFor = (v) => padTop + chartH - (v / niceMax) * chartH;
+
+    const ticks = [0, niceMax / 3, (niceMax * 2) / 3, niceMax];
+    const gridLines = ticks.map(t => {
+        const y = yFor(t).toFixed(1);
+        return `
+            <line x1="${padLeft}" y1="${y}" x2="${width - padRight}" y2="${y}" stroke="#e2e8f0" stroke-width="1"/>
+            <text x="${padLeft - 6}" y="${(Number(y) + 3).toFixed(1)}" font-size="10" fill="#94a3b8" text-anchor="end">${Math.round(t * 10) / 10}</text>
+        `;
+    }).join('');
+
+    const avgY = yFor(Number(avg) || 0).toFixed(1);
+    const avgLine = `
+        <line x1="${padLeft}" y1="${avgY}" x2="${width - padRight}" y2="${avgY}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="${width - padRight + 4}" y="${(Number(avgY) + 3).toFixed(1)}" font-size="9" fill="#94a3b8">${avg}</text>
+    `;
+
+    // Value label sits just above each bar. Near the very top of the chart there's
+    // not much headroom before padTop, so the label flips to sit just inside the
+    // bar's top edge instead of floating above it, rather than clipping off-canvas.
+    const bars = data.map((d, i) => {
+        const cx = padLeft + barSlot * i + barSlot / 2;
+        const val = Number(d.value);
+        const barH = Math.max(2, (val / niceMax) * chartH);
+        const y = padTop + chartH - barH;
+        const color = val > Number(avg) ? '#2563eb' : '#ef4444';
+        const labelAbove = y - padTop > 12;
+        const labelY = labelAbove ? y - 5 : y + 12;
+        const labelColor = labelAbove ? '#334155' : '#ffffff';
+        return `
+            <rect x="${(cx - barWidth / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barH.toFixed(1)}" fill="${color}" rx="3"/>
+            <text x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" font-size="9" font-weight="700" fill="${labelColor}" text-anchor="middle">${d.value}</text>
+        `;
+    }).join('');
+
+    // Every game gets its own date label now - no thinning needed since each bar
+    // already has a fixed, fully-readable slot width.
+    const xLabels = data.map((d, i) => {
+        const cx = padLeft + barSlot * i + barSlot / 2;
+        return `<text x="${cx.toFixed(1)}" y="${height - padBottom + 16}" font-size="9" fill="#94a3b8" text-anchor="middle">${d.date}</text>`;
+    }).join('');
+
+    return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="overflow:visible; display:block;">${gridLines}${avgLine}${bars}${xLabels}</svg>`;
+}
+
+function renderChartSection(chartData) {
+    if (!chartData || !chartData.data.length) return '';
+    return `
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+                <div class="text-sm font-bold text-gray-800">${chartData.title}</div>
+                <div class="text-xs text-gray-400">${chartData.subtitle}</div>
+            </div>
+            <div class="px-5 pt-4 pb-2 overflow-x-auto">${buildChartSVG(chartData)}</div>
+            <div class="px-5 py-2.5 border-t border-gray-100 flex gap-4 text-[11px] text-gray-500">
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-600 mr-1 align-[-1px]"></span>Over average</span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-red-500 mr-1 align-[-1px]"></span>Under average</span>
+                <span><span class="inline-block w-4 border-t-2 border-dashed border-gray-400 mr-1 align-middle"></span>Average (${chartData.avg})</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderBookmakersWidget(availableBookmakers) {
+    const rows = (availableBookmakers || []).map(b => {
+        const badge = b.bookmaker_logo
+            ? `<img src="${b.bookmaker_logo}" alt="${b.bookmaker_label}" class="h-6 max-w-[64px] object-contain" />`
+            : `<span class="text-[10px] font-bold bg-blue-800 text-white px-2 py-1 rounded">${b.bookmaker_label}</span>`;
+        return `
+            <div class="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-b-0">
+                ${badge}
+                <span class="text-sm font-medium text-gray-700 flex-1 truncate">${b.bookmaker_label}</span>
+                <a class="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1">
+                    Visit
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+                </a>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div class="px-4 py-3.5 border-b border-gray-100 text-sm font-bold text-gray-800">Available bookmakers</div>
+            ${rows || '<div class="px-4 py-4 text-xs text-gray-400">No bookmakers currently pricing this prediction.</div>'}
+        </div>
+    `;
+}
+
+function renderStandingsWidget(leagueStandings, leagueName, homeTeamId, awayTeamId) {
+    if (!leagueStandings || !leagueStandings.rows.length) return '';
+    const rows = leagueStandings.rows.map(r => {
+        const isMatchTeam = r.team.id === homeTeamId || r.team.id === awayTeamId;
+        return `
+            <div class="flex items-center gap-2.5 px-4 py-2 border-b border-gray-100 last:border-b-0 text-xs ${isMatchTeam ? 'bg-blue-50' : ''}">
+                <span class="w-5 text-center font-semibold text-gray-400">${r.position}</span>
+                <img src="${r.team.logo_url || ''}" class="w-5 h-5 object-contain flex-shrink-0" />
+                <span class="flex-1 truncate font-medium ${isMatchTeam ? 'text-blue-700 font-bold' : 'text-gray-700'}">${r.team.name}</span>
+                <span class="font-bold text-gray-800">${r.points}</span>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mt-4">
+            <div class="flex items-center justify-between px-4 py-3.5 border-b border-gray-100">
+                <div class="text-sm font-bold text-gray-800">League standings</div>
+                <div class="text-xs text-gray-400">${leagueName || ''}</div>
+            </div>
+            ${rows}
+
+            <!-- Footer -->
+            <div class="border-t border-gray-200 px-4 py-3.5 bg-white">
+                <a class="inline-flex items-center gap-1.5 text-sm font-bold text-blue-600 hover:text-blue-700 transition-colors">
+                    Full table
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                </a>
+            </div>
+        </div>
+    `;
+}
+
+function renderSimilarStreaks(similarStreaks) {
+    // Return empty state if no items exist
+    if (!similarStreaks || !similarStreaks.items || similarStreaks.items.length === 0) {
+        return `
+            <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm max-w-sm font-sans">
+                <div class="px-4 py-3.5 border-b border-gray-100 flex items-center gap-2 text-sm font-bold text-gray-800">
+                    <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Similar streaks
+                </div>
+                <div class="px-4 py-6 text-sm text-gray-400 text-center">
+                    No Similar markets currently available
+                </div>
+            </div>
+        `;
+    }
+
+    // Map through the streaks to create the individual cards
+    const similarStreaksHtml = similarStreaks.items
+        .map(streak => {
+            // Format market text (e.g., "Goals 2nd half - under 1.5")
+            const marketText = `${streak.market.label} - ${streak.prediction.direction} ${streak.prediction.threshold}`;
+
+            return `
+                <div class="bg-white border border-gray-200 rounded-xl p-3.5 shadow-sm">
+                    <div class="flex items-center justify-between mb-3">
+                        <!-- Home Team -->
+                        <div class="flex flex-col items-center w-1/3 gap-1.5">
+                            <img src="${streak.home.logo_url}" alt="${streak.home.name}" class="w-8 h-8 object-contain" onerror="this.style.display='none'">
+                            <span class="text-xs font-bold text-gray-800 text-center leading-tight">${streak.home.name}</span>
+                        </div>
+
+                        <!-- Streak Count -->
+                        <div class="flex flex-col items-center w-1/3">
+                            <span class="text-[28px] font-black text-blue-500 leading-none">${streak.streak_count}</span>
+                            <span class="text-[9px] font-extrabold text-gray-400 tracking-wider mt-1 uppercase">Streaks</span>
+                        </div>
+
+                        <!-- Away Team -->
+                        <div class="flex flex-col items-center w-1/3 gap-1.5">
+                            <img src="${streak.away.logo_url}" alt="${streak.away.name}" class="w-8 h-8 object-contain" onerror="this.style.display='none'">
+                            <span class="text-xs font-bold text-gray-800 text-center leading-tight">${streak.away.name}</span>
+                        </div>
+                    </div>
+
+                    <!-- Divider -->
+                    <div class="h-px bg-gray-100 w-full mb-2.5"></div>
+
+                    <!-- Market details and Confidence -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-medium text-gray-400">${marketText}</span>
+                        <span class="text-xs font-bold text-blue-500">${streak.confidence}%</span>
+                    </div>
+                </div>
+            `;
+        })
+        .join("");
+
+
+    // Render the final component
+    return `
+        <div class="bg-slate-50 border border-gray-200 rounded-xl overflow-hidden shadow-sm flex flex-col w-full max-w-sm font-sans">
+            
+            <!-- Header -->
+            <div class="px-4 py-3.5 border-b border-gray-200 bg-white flex items-center justify-between">
+                <div class="flex items-center gap-2 text-[15px] font-extrabold text-gray-800">
+                    Similar streaks
+                </div>
+                <span class="text-xs font-semibold text-gray-400">Same market</span>
+            </div>
+
+            <!-- Streaks List -->
+            <div class="p-3.5 flex flex-col gap-3">
+                ${similarStreaksHtml}
+            </div>
+
+            <!-- Footer -->
+            <div class="border-t border-gray-200 px-4 py-3.5 bg-white">
+                <a class="inline-flex items-center gap-1.5 text-sm font-bold text-blue-600 hover:text-blue-700 transition-colors">
+                    View all ${similarStreaks.otherSimilarStreakCounts} similar streaks
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                </a>
+            </div>
+            
+        </div>
+    `;
+}
+
+// Matchday-by-matchday table for both sides of the market this streak is about.
+// home.matches/away.matches are already most-recent-first, so columns read
+// left-to-right newest-to-oldest with no reordering needed. Column headers are
+// abstract "game N back" labels rather than real matchday numbers - matchdays
+// can be out of chronological order (rescheduled fixtures), and home/away play
+// on different dates anyway, so there's no single date that fits one column
+// for both rows.
+function renderMatchdayTable(home, away, marketLabel) {
+    const maxLength = Math.min(20, Math.max(home.matches.length, away.matches.length));
+    if (maxLength === 0) return '';
+
+    // Same right-aligned padding renderMarketComparisonTable already used: both rows
+    // share one set of columns, most recent on the left. A team with fewer games
+    // played (games in hand, joined a competition later, etc.) gets '-' padded into
+    // its leftmost/most-recent-labeled columns instead of its data sliding out of
+    // alignment with the other row.
+    const headerCells = Array.from({ length: maxLength }, (_, i) =>
+        `<th class="px-2.5 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-gray-400 whitespace-nowrap">MD${maxLength - i}</th>`
+    ).join('');
+
+    const renderRow = (side) => {
+        const startIndex = maxLength - side.matches.length;
+        const cells = Array.from({ length: maxLength }, (_, i) => {
+            const m = i >= startIndex ? side.matches[i - startIndex] : null;
+            if (!m) return `<td class="text-center px-2.5 py-2 text-xs text-gray-300">-</td>`;
+            const isOver = side.season_avg !== null && m.value > side.season_avg;
+            const cls = isOver ? 'text-blue-600 bg-blue-50' : 'text-red-600 bg-red-50';
+            return `<td class="text-center px-2.5 py-2"><span class="inline-block min-w-[22px] px-1.5 py-0.5 rounded text-xs font-bold ${cls}">${m.value}</span></td>`;
+        }).join('');
+
+        return `
+            <tr class="border-b border-gray-100 last:border-b-0">
+                <td class="px-4 py-2 sticky left-0 bg-white">
+                    <div class="flex items-center gap-2 whitespace-nowrap">
+                        <img src="${side.team.logo_url || ''}" class="w-5 h-5 object-contain flex-shrink-0" />
+                        <span class="text-xs font-bold text-gray-800">${side.team.name}</span>
+                    </div>
+                </td>
+                <td class="px-3 py-2 text-center text-xs font-semibold text-gray-600 whitespace-nowrap">${side.season_avg ?? '&mdash;'}</td>
+                <td class="px-3 py-2 text-center text-xs font-bold text-blue-600 whitespace-nowrap">${side.streak?.count ?? '&mdash;'}</td>
+                ${cells}
+            </tr>
+        `;
+    };
+
+    return `
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mt-4">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+                <div class="text-sm font-bold text-gray-800">${marketLabel} &mdash; matchday by matchday</div>
+                <div class="text-xs text-gray-400">Scroll for more &rarr;</div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full border-collapse min-w-[700px]">
+                    <thead>
+                        <tr class="bg-gray-50 border-b border-gray-100">
+                            <th class="text-left px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400 sticky left-0 bg-gray-50">Team</th>
+                            <th class="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">Avg</th>
+                            <th class="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">Streak</th>
+                            ${headerCells}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${renderRow(home)}
+                        ${renderRow(away)}
+                    </tbody>
+                </table>
+            </div>
+            <div class="px-5 py-2.5 border-t border-gray-100 flex gap-4 text-[11px] text-gray-500">
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-50 border border-blue-200 mr-1 align-[-1px]"></span>Over that team's own average</span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-red-50 border border-red-200 mr-1 align-[-1px]"></span>At or under that team's own average</span>
+            </div>
+        </div>
+    `;
+}
+
+const TEAM_STAT_ROWS = [
+    { key: 'goals_scored', label: 'Goals scored / game', higherIsBetter: true },
+    { key: 'goals_conceded', label: 'Goals conceded / game', higherIsBetter: false },
+    { key: 'goals_1st_half', label: 'Goals 1st half / game', higherIsBetter: true },
+    { key: 'goals_2nd_half', label: 'Goals 2nd half / game', higherIsBetter: true },
+    { key: 'corners', label: 'Corners / game', higherIsBetter: true },
+    { key: 'yellow_cards', label: 'Yellow cards / game', higherIsBetter: false },
+    { key: 'possession', label: 'Avg possession', higherIsBetter: true, isPercent: true },
+    { key: 'shots', label: 'Shots / game', higherIsBetter: true },
+    { key: 'clean_sheets', label: 'Clean sheets', higherIsBetter: true }
+];
+
+function renderTeamStatsSection(statistics, match, leagueStandings) {
+    if (!statistics) return '';
+    const { home, away, league_avg } = statistics;
+
+    const homeStanding = leagueStandings?.rows.find(r => r.team.id === match.home.id);
+    const awayStanding = leagueStandings?.rows.find(r => r.team.id === match.away.id);
+
+    const rows = TEAM_STAT_ROWS.map(({ key, label, higherIsBetter, isPercent }) => {
+        const h = home[key], a = away[key], lg = league_avg[key];
+        if (h === null || a === null) {
+            return `
+                <div class="flex items-center gap-3 px-5 py-3 border-b border-gray-100 last:border-b-0">
+                    <div class="w-16 text-right text-sm font-bold text-gray-300">&mdash;</div>
+                    <div class="flex-1 text-center">
+                        <div class="text-xs font-semibold text-gray-500">${label}</div>
+                    </div>
+                    <div class="w-16 text-sm font-bold text-gray-300">&mdash;</div>
+                </div>
+            `;
+        }
+        const hWins = higherIsBetter ? h > a : h < a;
+        const aWins = higherIsBetter ? a > h : a < h;
+        const total = h + a || 1;
+        const hPct = Math.round((h / total) * 100);
+        const suffix = isPercent ? '%' : '';
+
+        return `
+            <div class="flex items-center gap-3 px-5 py-3 border-b border-gray-100 last:border-b-0">
+                <div class="w-16 text-right text-sm font-bold ${hWins ? 'text-blue-600' : 'text-gray-800'}">${h}${suffix}</div>
+                <div class="flex-1 text-center">
+                    <div class="text-xs font-semibold text-gray-600">${label}</div>
+                    <div class="text-[10px] text-gray-400 mt-0.5">League avg: ${lg ?? '&mdash;'}${lg !== null ? suffix : ''}</div>
+                    <div class="flex h-1 rounded-full overflow-hidden mt-1.5 bg-gray-100">
+                        <div class="bg-blue-500" style="width:${hPct}%"></div>
+                        <div class="bg-gray-700" style="width:${100 - hPct}%"></div>
+                    </div>
+                </div>
+                <div class="w-16 text-sm font-bold ${aWins ? 'text-blue-600' : 'text-gray-800'}">${a}${suffix}</div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mt-4">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+                <div class="text-sm font-bold text-gray-800">Team statistics</div>
+                <div class="text-xs text-gray-400">Season averages per market</div>
+            </div>
+            <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-5 py-4 border-b border-gray-100">
+                <div class="flex items-center gap-2.5">
+                    <img src="${match.home.logo_url || ''}" class="w-9 h-9 object-contain" />
+                    <div>
+                        <div class="text-sm font-bold text-gray-800">${match.home.name}</div>
+                        <div class="text-[11px] text-gray-400">${homeStanding ? `${ordinal(homeStanding.position)} &middot; ${homeStanding.points} pts` : ''}</div>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <div class="text-xs font-bold text-gray-400">VS</div>
+                    <div class="text-[10px] text-gray-400">with league average</div>
+                </div>
+                <div class="flex items-center gap-2.5 justify-end text-right">
+                    <div>
+                        <div class="text-sm font-bold text-gray-800">${match.away.name}</div>
+                        <div class="text-[11px] text-gray-400">${awayStanding ? `${ordinal(awayStanding.position)} &middot; ${awayStanding.points} pts` : ''}</div>
+                    </div>
+                    <img src="${match.away.logo_url || ''}" class="w-9 h-9 object-contain" />
+                </div>
+            </div>
+            ${rows}
+        </div>
+    `;
+}
+
+export const showStreakDetailView = async (streakId) => {
+    const streakDetailContainer = document.getElementById('streak-detail-container');
+    streakDetailContainer.innerHTML = `
+        <div class="p-8 text-center text-gray-400"><div class="animate-pulse">Loading streak detail...</div></div>
+    `;
+
+    let data;
+    try {
+        const apiToken = await getApiToken();
+        const res = await fetch(`/api/matchup/${streakId}`, {
+            headers: { Authorization: `Bearer ${apiToken?.token}` }
+        });
+        const result = await res.json();
+        if (!result.success) throw new Error(result.message || 'Failed to load streak detail');
+        data = result.data;
+    } catch (error) {
+        console.error(error);
+        streakDetailContainer.innerHTML = `
+            <button id="closeContainerBtn" class="mb-3 text-sm text-gray-500 hover:text-gray-800">&larr; Back</button>
+            <div class="p-4 text-xs text-red-500">Failed to load streak detail.</div>
+        `;
+        document.getElementById('closeContainerBtn').addEventListener('click', () => openTab(prevTab));
+        return;
+    }
+
+    const { match, market, streak_count, prediction, confidence, confidence_label, odds, availableBookmakers, leagueStandings, similarStreaks } = data;
+    const circumference = 2 * Math.PI * 21;
+    const dashOffset = circumference * (1 - confidence / 100);
+
+    // Available bookmakers should cover match-winner odds too, not just whoever is
+    // pricing this one prediction - merge in home_win/away_win's bookmakers,
+    // deduping by bookmaker identity so one already in the list isn't repeated.
+    const allBookmakers = [...availableBookmakers];
+    const seenBookmakers = new Set(availableBookmakers.map(b => b.bookmaker));
+    for (const odd of [odds.home_win, odds.away_win]) {
+        if (odd && !seenBookmakers.has(odd.bookmaker)) {
+            const { value, ...rest } = odd;
+            allBookmakers.push(rest);
+            seenBookmakers.add(odd.bookmaker);
+        }
+    }
+
+    streakDetailContainer.innerHTML = `
+        <button id="closeContainerBtn" class="mb-3 text-sm text-gray-500 hover:text-gray-800">&larr; Back</button>
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div class="grid grid-cols-1 md:grid-cols-[190px_1fr_190px_1.4fr]">
+                <div class="flex flex-col items-center justify-center gap-2 p-6 border-r border-gray-100">
+                    <img src="${match.home.logo_url || ''}" class="w-14 h-14 object-contain" />
+                    <div class="text-sm font-bold text-gray-800 text-center">${match.home.name}</div>
+                    <div class="text-[11px] text-gray-400">Home &middot; <strong class="text-blue-600">${ordinal(match.home.position)} place</strong></div>
+                    ${renderOddPill(odds.home_win)}
+                </div>
+
+                <div class="flex flex-col items-center justify-center text-center gap-1 p-5">
+                    <div class="text-5xl font-extrabold text-blue-600 leading-none">${streak_count}</div>
+                    <div class="text-xs font-bold uppercase tracking-wide text-gray-800 mt-1">Streaks</div>
+                    <div class="text-[11px] text-gray-400 mt-1">${market.label}</div>
+                    <div class="text-[11px] text-gray-400 mt-1">${match.date_display}</div>
+                    <div class="text-[11px] text-blue-600 font-semibold mt-0.5">${match.league.name}</div>
+                </div>
+
+                <div class="flex flex-col items-center justify-center gap-2 p-6 border-l border-r border-gray-100">
+                    <img src="${match.away.logo_url || ''}" class="w-14 h-14 object-contain" />
+                    <div class="text-sm font-bold text-gray-800 text-center">${match.away.name}</div>
+                    <div class="text-[11px] text-gray-400">Away &middot; <strong class="text-blue-600">${ordinal(match.away.position)} place</strong></div>
+                    ${renderOddPill(odds.away_win)}
+                </div>
+
+                <div class="p-6 flex flex-col justify-center gap-1">
+                    <div class="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Prediction Market &middot; ${market.label}</div>
+                    <div class="flex items-start gap-2 flex-wrap my-1">
+                        <div class="text-[15px] font-bold text-gray-800 flex-1">${prediction.text}</div>
+                        ${renderOddPill(odds.recommended)}
+                    </div>
+                    <div class="text-xs text-gray-500 leading-relaxed">${prediction.description}</div>
+
+                    <div class="flex items-center gap-3 mt-3 bg-gray-50 border border-gray-200 rounded-xl p-3">
+                        <div class="relative w-[52px] h-[52px] flex-shrink-0">
+                            <svg width="52" height="52" viewBox="0 0 52 52" class="-rotate-90">
+                                <circle cx="26" cy="26" r="21" fill="none" stroke="#e2e8f0" stroke-width="4.5"/>
+                                <circle cx="26" cy="26" r="21" fill="none" stroke="#2563eb" stroke-width="4.5"
+                                    stroke-linecap="round" stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset}"/>
+                            </svg>
+                            <div class="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-blue-600">${confidence}%</div>
+                        </div>
+                        <div>
+                            <div class="text-[17px] font-bold text-gray-800 leading-none">${confidence}% Confidence</div>
+                           <!-- <div class="text-[11px] text-gray-400 mt-1">${confidence_label} &mdash; strong signal across ${streak_count} matches</div> -->
+                        </div>
+                    </div>
+
+                    ${odds.recommended ? `
+                        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                            <a 
+                                class="inline-flex items-center gap-1.5 bg-blue-600 text-white text-[13px] font-semibold px-4 py-2 rounded-lg hover:bg-blue-700">
+                                Bet on ${odds.recommended.bookmaker_label}
+                            </a>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 mt-4 items-start">
+            <div>
+                ${renderChartSection(data.chartData)}
+                ${renderMatchdayTable(data.home, data.away, market.label)}
+                ${renderTeamStatsSection(data.statistics, match, leagueStandings)}
+            </div>
+            <div>
+                ${renderBookmakersWidget(allBookmakers)}
+                ${renderStandingsWidget(leagueStandings, match.league.name, match.home.id, match.away.id)}
+                ${renderSimilarStreaks(similarStreaks)}
+            </div>
+        </div>
+    `;
+
+    document.getElementById('closeContainerBtn').addEventListener('click', () => {
+        openTab(prevTab);
+    });
 }
 
 export async function handleStreakPopUp(homeData, awayData) {
@@ -1329,18 +1870,20 @@ export function toggleAuditPanel(marketSlug) {
         arrow.classList.remove('text-blue-600', 'bg-blue-50');
     }
 }
-export function openTab(tabName) {
+export function openTab(tabName, customProp = null) {
     state.activeTab = tabName;
 
     const finishedMatchesView = document.getElementById('matchday-container');
     const thisTeamMarketAvgsView = document.getElementById('team-avgs-container');
     const upcomingMatchesContainer = document.getElementById('upcoming-matches-container');
     const inDepthContainer = document.getElementById('in-depth-container');
+    const streakDetailContainer = document.getElementById('streak-detail-container');
 
     finishedMatchesView.style.display = 'none';
     thisTeamMarketAvgsView.style.display = 'none';
     upcomingMatchesContainer.style.display = 'none';
     inDepthContainer.style.display = 'none';
+    streakDetailContainer.style.display = 'none'
     document.getElementById('upComingGamesSwitchContainer').style.display = 'none'
 
     if (tabName === 'matchday-container') {
@@ -1360,6 +1903,10 @@ export function openTab(tabName) {
         prevTab = 'in-depth-container';
         openTableView();
         inDepthContainer.style.display = 'block';
+    }
+    if (tabName == 'streak-detail-container') {
+        showStreakDetailView(customProp)
+        streakDetailContainer.style.display = 'block'
     }
 
     setActiveTabButton(tabName);

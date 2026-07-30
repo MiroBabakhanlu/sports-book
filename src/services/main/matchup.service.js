@@ -48,6 +48,7 @@ async function getStatsMarketIndex() {
             const rows = await prisma.market.findMany({
                 where: { slug: { in: STATS_MARKETS.map(m => m.slug) } }
             });
+            console.log('rows', rows)
             return new Map(rows.map(r => [r.slug, r.id]));
         })().catch((err) => {
             statsMarketIndexPromise = null;
@@ -68,6 +69,7 @@ function roundOrNull(val) {
 async function buildStatistics(homeTeamId, awayTeamId, seasonId) {
     const marketBySlug = await getStatsMarketIndex();
     const marketIds = STATS_MARKETS.map(m => marketBySlug.get(m.slug)).filter(Boolean);
+    console.log('marketIds', marketIds)
     const cleanSheetsMarketId = marketBySlug.get('team-clean-sheets');
 
     const [averages, leagueRows] = await Promise.all([
@@ -83,7 +85,7 @@ async function buildStatistics(homeTeamId, awayTeamId, seasonId) {
             select: { market_id: true, avg_value: true, matches_played: true }
         })
     ]);
-
+    console.log('leagueRows', leagueRows)
     // rate * matches_played, rounded - only meaningful for clean_sheets (a count),
     // everything else just wants the rate/average itself, rounded to 2dp.
     const toDisplayValue = (marketId, avgValue, matchesPlayed) =>
@@ -92,6 +94,7 @@ async function buildStatistics(homeTeamId, awayTeamId, seasonId) {
             : roundOrNull(avgValue);
 
     const avgByTeamMarket = new Map(averages.map(a => [`${a.team_id}-${a.market_id}`, a]));
+    console.log('avgByTeamMarket', avgByTeamMarket)
 
     const buildSide = (teamId) => {
         const side = {};
@@ -100,6 +103,7 @@ async function buildStatistics(homeTeamId, awayTeamId, seasonId) {
             const row = marketId ? avgByTeamMarket.get(`${teamId}-${marketId}`) : undefined;
             side[key] = row ? toDisplayValue(marketId, row.avg_value, row.matches_played) : null;
         }
+        console.log("side", side)
         return side;
     };
 
@@ -112,6 +116,7 @@ async function buildStatistics(homeTeamId, awayTeamId, seasonId) {
         if (!byMarket.has(row.market_id)) byMarket.set(row.market_id, []);
         byMarket.get(row.market_id).push(row);
     }
+    console.log('byMarket', byMarket)
     const leagueAvg = {};
     for (const { slug, key } of STATS_MARKETS) {
         const marketId = marketBySlug.get(slug);
@@ -161,7 +166,7 @@ async function buildTeamSide(teamId, seasonId, marketId, teamInfo) {
                 match: {
                     select: {
                         id: true, kickoff_at: true, home_score: true, away_score: true,
-                        home_team_id: true,
+                        home_team_id: true, matchday: true,
                         homeTeam: { select: { id: true, name: true } },
                         awayTeam: { select: { id: true, name: true } }
                     }
@@ -179,6 +184,7 @@ async function buildTeamSide(teamId, seasonId, marketId, teamInfo) {
             return {
                 match_id: `match_${m.id}`,
                 date: m.kickoff_at.toISOString().slice(0, 10),
+                matchday: m.matchday,
                 venue: isHome ? 'home' : 'away',
                 opponent: { id: `team_${opponent.id}`, name: opponent.name },
                 score: `${m.home_score}-${m.away_score}`,
@@ -201,6 +207,7 @@ async function buildTeamSide(teamId, seasonId, marketId, teamInfo) {
 const matchupService = {
     getMatchup: async (streakId) => {
         const base = await streaksService.resolveCandidateByStreakId(streakId);
+        console.log('base', base)
 
         const match = await prisma.match.findUnique({
             where: { id: base._matchId },
@@ -242,12 +249,16 @@ const matchupService = {
         const streakTeamName = isHomeStreak ? base.match.home.name : base.match.away.name;
 
         // streakSide.matches is most-recent-first and unlimited (every finished match
-        // this season) - take exactly streak_count (no floor/cap, per instruction),
-        // then reverse to chronological order for the chart's left-to-right x-axis.
-        const chartMatches = streakSide.matches.slice(0, base.streak_count).slice().reverse();
+        // this season) - take streak_count*2 so the chart shows the streak itself plus
+        // an equal number of games right before it started (context: what the pattern
+        // looked like beforehand, including the game that would have broken an earlier
+        // streak). .slice() naturally caps this at however many matches actually exist
+        // if the team hasn't played that many games yet. Reversed to chronological
+        // order for the chart's left-to-right x-axis.
+        const chartMatches = streakSide.matches.slice(0, base.streak_count * 2).slice().reverse();
         const chartData = {
             title: `${base.market.label} per match`,
-            subtitle: `${streakTeamName} - last ${base.streak_count} games`,
+            subtitle: `${streakTeamName} - last ${chartMatches.length} games`,
             avg: streakSide.season_avg,
             data: chartMatches.map(m => ({ date: formatChartDate(m.date), value: m.value }))
         };
@@ -257,7 +268,13 @@ const matchupService = {
 
         return {
             streak_id: base.id,
+            streak_count: base.streak_count,
             market: base.market,
+            prediction: base.prediction,
+            confidence: base.confidence,
+            confidence_label: base.confidence_label,
+            status: base.status,
+            odds: base.odds,
             match: matchWithPositions,
             home,
             away,

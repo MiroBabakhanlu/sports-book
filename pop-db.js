@@ -1,5 +1,6 @@
 const { prisma, connectDB } = require('./src/utils/prisma');
 const axios = require('axios');
+const { generateMissingStatsReport } = require('./generate-missing-stats-report');
 
 const API_KEY = '6dea7d814258faa2db4f3051b6cfc065';
 const BASE_URL = 'https://v3.football.api-sports.io';
@@ -44,6 +45,44 @@ async function upsertMatchStat(tx, matchId, teamId, marketId, value, side) {
             side: side
         }
     });
+}
+
+// Purely additive monitoring - does not change what gets written to MatchTeamStat
+// or any existing average/streak computation. Each raw API stat type maps to the
+// canonical market(s) it feeds; when getRawStatValue() would have silently defaulted
+// to 0 because f.statistics had no entry for that type, this logs exactly which
+// team+match+market was affected instead, so it can be queried later (e.g. "how much
+// data is missing for market X in league Y") without digging through zero-value rows
+// by hand.
+const RAW_STAT_TO_MARKETS = {
+    'Yellow Cards': ['team-yellow-cards', 'total-yellow-cards'],
+    'Red Cards': ['team-red-cards', 'total-red-cards'],
+    'Corner Kicks': ['team-corner-kicks', 'total-corner-kicks'],
+    'Ball Possession': ['team-possession'],
+    'Total Shots': ['team-shots']
+};
+
+async function logMissingStats(tx, { matchId, teamId, leagueId, seasonId, matchIdApi, statsArray, marketsBySlug }) {
+    for (const [rawType, affectedSlugs] of Object.entries(RAW_STAT_TO_MARKETS)) {
+        const found = statsArray.find(s => s.type === rawType);
+        if (found) continue;
+
+        for (const slug of affectedSlugs) {
+            const market = marketsBySlug.get(slug);
+            if (!market) continue;
+
+            await tx.missingMatchStat.upsert({
+                where: {
+                    match_id_team_id_market_id: { match_id: matchId, team_id: teamId, market_id: market.id }
+                },
+                update: { detected_at: new Date() },
+                create: {
+                    match_id: matchId, team_id: teamId, market_id: market.id,
+                    league_id: leagueId, season_id: seasonId, match_id_api: matchIdApi
+                }
+            });
+        }
+    }
 }
 
 // 2. Helper function now accepts the transaction client (tx)
@@ -304,6 +343,7 @@ async function processLeague(leagueId, seasonYear) {
             where: { slug: { in: targetSlugs } }
         });
         console.log(`Loaded ${dbMarkets.length} from market table`);
+        const marketsBySlug = new Map(dbMarkets.map(m => [m.slug, m]));
 
         console.log('Fetching fixtures');
         const fixturesResponse = await axios.get(`${BASE_URL}/fixtures`, {
@@ -390,6 +430,20 @@ async function processLeague(leagueId, seasonYear) {
                 const homeStatsArray = f.statistics?.find(s => s.team.id === f.teams.home.id)?.statistics || [];
                 const awayStatsArray = f.statistics?.find(s => s.team.id === f.teams.away.id)?.statistics || [];
 
+                // Only finished matches can meaningfully be "missing" stats - an NS/PST
+                // fixture trivially has no statistics yet because it hasn't been played,
+                // which isn't a data gap and would otherwise flood this table with noise.
+                if (isFinished) {
+                    await logMissingStats(tx, {
+                        matchId: match.id, teamId: homeTeam.id, leagueId: dbLeague.id, seasonId: dbSeason.id,
+                        matchIdApi: apiMatchId, statsArray: homeStatsArray, marketsBySlug
+                    });
+                    await logMissingStats(tx, {
+                        matchId: match.id, teamId: awayTeam.id, leagueId: dbLeague.id, seasonId: dbSeason.id,
+                        matchIdApi: apiMatchId, statsArray: awayStatsArray, marketsBySlug
+                    });
+                }
+
                 const getRawStatValue = (statsArray, typeString) => {
                     const found = statsArray.find(s => s.type === typeString);
                     return found ? (parseInt(found.value) || 0) : 0;
@@ -449,6 +503,7 @@ async function processLeague(leagueId, seasonYear) {
                         await upsertMatchStat(tx, match.id, awayTeam.id, market.id, awayCorners, 'away');
                     }
                     else if (market.slug === 'total-corner-kicks') {
+                        console.log('total corners', homeCorners, awayCorners, homeTeam.id, awayTeam.id)
                         finalValue = homeCorners + awayCorners;
                         await upsertMatchStat(tx, match.id, homeTeam.id, market.id, finalValue, 'home');
                         await upsertMatchStat(tx, match.id, awayTeam.id, market.id, finalValue, 'away');
@@ -542,6 +597,14 @@ async function runPipelines(tasks) {
 
                 console.error(error.stack);
             }
+        }
+
+        // Runs once after every league in this batch has been processed, not per-league -
+        // a single up-to-date snapshot across everything just synced, not N partial ones.
+        try {
+            await generateMissingStatsReport();
+        } catch (error) {
+            console.error('[!] Failed to generate missing stats report:', error.message);
         }
 
     } catch (error) {

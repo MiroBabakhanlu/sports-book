@@ -172,6 +172,7 @@ const route = express.Router();
  *             properties:
  *               match_id: { type: string, example: 'match_1701' }
  *               date: { type: string, format: date }
+ *               matchday: { type: integer, nullable: true, example: 17, description: Extracted from the API's round string - can be null (e.g. cup rounds with no numeric round), and isn't guaranteed to be chronological (rescheduled fixtures) }
  *               venue: { type: string, enum: [home, away] }
  *               opponent:
  *                 type: object

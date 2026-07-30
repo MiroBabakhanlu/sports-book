@@ -38,8 +38,9 @@ model League {
   is_pinned     Boolean @default(false)
 
   // Relations
-  sport   Sport    @relation(fields: [sport_id], references: [id])
-  seasons Season[]
+  sport             Sport              @relation(fields: [sport_id], references: [id])
+  seasons           Season[]
+  missingMatchStats MissingMatchStat[]
 
   @@map("LEAGUE")
 }
@@ -59,6 +60,7 @@ model Season {
   teamSeasonAverages TeamSeasonAverage[]
   teamStreaks        TeamStreak[]
   teamStandings      TeamStanding[]
+  missingMatchStats  MissingMatchStat[]
 
   @@unique([league_id, id_api], name: "id_api_league_id") //new
   @@map("SEASON")
@@ -83,6 +85,7 @@ model Team {
   teamSeasonAverages TeamSeasonAverage[]
   teamStreaks        TeamStreak[]
   teamStandings      TeamStanding[]
+  missingMatchStats  MissingMatchStat[]
 
   @@map("TEAM")
 }
@@ -103,12 +106,13 @@ model Match {
   fetched_at     DateTime  @default(now())
 
   // Relations
-  season     Season          @relation(fields: [season_id], references: [id])
-  homeTeam   Team            @relation("HomeTeamMatches", fields: [home_team_id], references: [id])
-  awayTeam   Team            @relation("AwayTeamMatches", fields: [away_team_id], references: [id])
-  winnerTeam Team?           @relation("WinnerTeamMatches", fields: [winner_team_id], references: [id])
-  stats      MatchTeamStat[]
-  matchOdds  MatchOdds[]
+  season       Season             @relation(fields: [season_id], references: [id])
+  homeTeam     Team               @relation("HomeTeamMatches", fields: [home_team_id], references: [id])
+  awayTeam     Team               @relation("AwayTeamMatches", fields: [away_team_id], references: [id])
+  winnerTeam   Team?              @relation("WinnerTeamMatches", fields: [winner_team_id], references: [id])
+  stats        MatchTeamStat[]
+  matchOdds    MatchOdds[]
+  missingStats MissingMatchStat[]
 
   @@map("MATCH")
 }
@@ -127,8 +131,32 @@ model Market {
   teamSeasonAverages TeamSeasonAverage[]
   teamStreaks        TeamStreak[]
   matchOdds          MatchOdds[]
+  missingMatchStats  MissingMatchStat[]
 
   @@map("MARKET")
+}
+
+model MissingMatchStat {
+  id           Int      @id @default(autoincrement())
+  match_id     Int
+  team_id      Int
+  market_id    Int
+  league_id    Int
+  season_id    Int
+  match_id_api String
+  detected_at  DateTime @default(now())
+
+  // Relations
+  match  Match  @relation(fields: [match_id], references: [id])
+  team   Team   @relation(fields: [team_id], references: [id])
+  market Market @relation(fields: [market_id], references: [id])
+  league League @relation(fields: [league_id], references: [id])
+  season Season @relation(fields: [season_id], references: [id])
+
+  // One row per match+team+market - re-running pop-db.js for the same match just
+  // upserts (refreshes detected_at) instead of piling up duplicate rows.
+  @@unique([match_id, team_id, market_id], name: "match_id_team_id_market_id")
+  @@map("MISSING_MATCH_STAT")
 }
 
 model MatchOdds {

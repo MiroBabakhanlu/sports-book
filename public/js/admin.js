@@ -438,7 +438,7 @@ const changeLeaguePinStatus = async (leagueId) => {
 }
 
 
-const getApiToken = async () => {
+export const getApiToken = async () => {
     try {
         const response = await axios.get(`${API_URL}/api-token`);
         return response.data?.data;
