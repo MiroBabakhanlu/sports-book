@@ -10,6 +10,7 @@ const allowedOrigins = [
     'http://localhost:8080', // local server's own origin - admin panel same-origin calls in local dev
     'https://sports-book-client-production.up.railway.app',
     'https://sports-book-production.up.railway.app',
+    'https://node.assuredbets.com',
     ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) : []),
 ];
 
