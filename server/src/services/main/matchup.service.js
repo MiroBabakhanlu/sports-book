@@ -294,6 +294,10 @@ const matchupService = {
             status: base.status,
             odds: base.odds,
             match: matchWithPositions,
+            // Which side (home/away) this streak/prediction is actually about -
+            // both teams are shown side by side, but only one of them is the
+            // subject; the frontend needs this to highlight the right one.
+            streak_side: isHomeStreak ? 'home' : 'away',
             home,
             away,
             chartData,

@@ -1074,6 +1074,118 @@ function renderOddPill(odd) {
     `;
 }
 
+// oddeven/both-teams-score are 1/0 outcomes, not a continuous quantity, so a bar
+// chart (height = magnitude) doesn't carry any information a bar chart normally
+// would - every bar is either full or empty. A two-lane step chart reads much
+// better for a binary sequence: each match is a dot on whichever lane it landed
+// on, connected point-to-point, so a run of same-lane dots is instantly visible
+// as a flat, thick, filled segment instead of an alternating bar spike pattern.
+const BINARY_CHART_CONFIG = {
+    odd_even: { positive: 'ODD', negative: 'EVEN' },
+    both_teams_score: { positive: 'YES', negative: 'NO' }
+};
+// Same blue/red pair the rest of the app already uses for over/under average
+// (buildChartSVG below, the confidence ring, renderMatchdayTable).
+const CHART_BLUE = '#2563eb';
+const CHART_ROSE = '#ef4444';
+
+// chartData.data is most-recent-first (see matchup.service.js) so every other
+// chart/table on this page reads latest-first; this one specifically wants
+// oldest-to-newest left-to-right (matches the "latest" label sitting on the
+// rightmost point), so it reverses its own local copy rather than the shared one.
+function buildTwoLaneTrackSVG(chartData, config, streakCount) {
+    const chronological = chartData.data.slice().reverse();
+    const n = chronological.length;
+    if (n === 0) return '';
+
+    const slot = 68;
+    const padLeft = 96, padRight = 24, padTop = 46, padBottom = 34;
+    const laneGap = 92;
+    const topLaneY = padTop + 22;
+    const bottomLaneY = topLaneY + laneGap;
+    const width = padLeft + padRight + slot * Math.max(n - 1, 1) + 20;
+    const height = padTop + laneGap + 46 + padBottom;
+
+    // The streak always sits against the most recent (rightmost) point here -
+    // that's the one fixed anchor streak-tracker.js counts backward from - so
+    // the highlighted run is always the last `streakCount` points chronologically.
+    const streakStart = Math.max(0, n - streakCount);
+    const lastValue = Number(chronological[n - 1].value);
+    const streakIsPositive = lastValue === 1;
+    const streakColor = streakIsPositive ? CHART_BLUE : CHART_ROSE;
+
+    const laneBands = `
+        <rect x="${padLeft - 16}" y="${topLaneY - 20}" width="${width - padLeft - padRight + 16}" height="40" fill="${CHART_BLUE}0d" rx="8"/>
+        <rect x="${padLeft - 16}" y="${bottomLaneY - 20}" width="${width - padLeft - padRight + 16}" height="40" fill="${CHART_ROSE}0d" rx="8"/>
+        <text x="${padLeft - 24}" y="${topLaneY + 3}" font-size="11" font-weight="800" fill="${CHART_BLUE}" text-anchor="end">${config.positive}</text>
+        <text x="${padLeft - 24}" y="${bottomLaneY + 3}" font-size="11" font-weight="800" fill="${CHART_ROSE}" text-anchor="end">${config.negative}</text>
+    `;
+
+    const points = chronological.map((d, i) => {
+        const x = padLeft + slot * i;
+        const isPositive = Number(d.value) === 1;
+        const y = isPositive ? topLaneY : bottomLaneY;
+        return { x, y, isPositive, date: d.date, inStreak: i >= streakStart };
+    });
+
+    const segments = [];
+    for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        const bothInStreak = a.inStreak && b.inStreak;
+        const color = bothInStreak ? streakColor : '#cbd5e1';
+        const strokeWidth = bothInStreak ? 4 : 1.5;
+        segments.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round"/>`);
+    }
+
+    const dots = points.map((p, i) => {
+        const isLast = i === points.length - 1;
+        const laneColor = p.isPositive ? CHART_BLUE : CHART_ROSE;
+        const r = isLast ? 9 : (p.inStreak ? 7 : 5.5);
+        const fill = p.inStreak ? laneColor : '#ffffff';
+        const ring = isLast && p.inStreak
+            ? `<circle cx="${p.x}" cy="${p.y}" r="${r + 4}" fill="none" stroke="${laneColor}" stroke-width="2" opacity="0.35"/>`
+            : '';
+        const dateLabel = `<text x="${p.x}" y="${bottomLaneY + 46}" font-size="9" fill="#94a3b8" text-anchor="middle">${p.date}</text>`;
+        const latestLabel = isLast
+            ? `<text x="${p.x}" y="${bottomLaneY + 58}" font-size="9" font-weight="700" fill="#2563eb" text-anchor="middle">latest</text>`
+            : '';
+        return `
+            ${ring}
+            <circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${fill}" stroke="${laneColor}" stroke-width="2.5"/>
+            ${dateLabel}${latestLabel}
+        `;
+    }).join('');
+
+    // Badge sits above the midpoint of the highlighted streak segment, which is
+    // always the tail end (rightmost points) since the streak is anchored to the
+    // most recent match.
+    const badgeMidX = (points[streakStart].x + points[n - 1].x) / 2;
+    const badgeText = `CURRENT STREAK: ${streakCount}`;
+    const badgeWidth = 34 + badgeText.length * 5.6;
+    const badge = streakCount > 0 ? `
+        <rect x="${(badgeMidX - badgeWidth / 2).toFixed(1)}" y="6" width="${badgeWidth.toFixed(1)}" height="20" rx="10" fill="${streakColor}"/>
+        <text x="${badgeMidX.toFixed(1)}" y="20" font-size="10" font-weight="800" fill="#ffffff" text-anchor="middle">${badgeText}</text>
+    ` : '';
+
+    return {
+        svg: `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="overflow:visible; display:block;">${laneBands}${segments.join('')}${dots}${badge}</svg>`
+    };
+}
+
+function renderBinaryChartSection(chartData, config, streakCount) {
+    if (!chartData || !chartData.data.length) return '';
+    const { svg } = buildTwoLaneTrackSVG(chartData, config, streakCount);
+    return `
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+                <div class="text-sm font-bold text-gray-800">${chartData.title}</div>
+                <div class="text-xs text-gray-400">${chartData.subtitle}</div>
+            </div>
+            <div class="px-5 pt-4 pb-2 overflow-x-auto">${svg}</div>
+        </div>
+    `;
+}
+
 // The reference line here is the team's season AVERAGE (chartData.avg), not a
 // betting threshold - a bar is "over"/"under" purely relative to that average.
 function buildChartSVG(chartData) {
@@ -1492,7 +1604,9 @@ export const showStreakDetailView = async (streakId) => {
         return;
     }
 
-    const { match, market, streak_count, prediction, confidence, confidence_label, odds, availableBookmakers, leagueStandings, similarStreaks } = data;
+    const { match, market, streak_count, prediction, confidence, confidence_label, odds, availableBookmakers, leagueStandings, similarStreaks, streak_side } = data;
+    const isHomeStreakTeam = streak_side === 'home';
+    const isAwayStreakTeam = streak_side === 'away';
     const circumference = 2 * Math.PI * 21;
     const dashOffset = circumference * (1 - confidence / 100);
 
@@ -1513,7 +1627,8 @@ export const showStreakDetailView = async (streakId) => {
         <button id="closeContainerBtn" class="mb-3 text-sm text-gray-500 hover:text-gray-800">&larr; Back</button>
         <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
             <div class="grid grid-cols-1 md:grid-cols-[190px_1fr_190px_1.4fr]">
-                <div class="flex flex-col items-center justify-center gap-2 p-6 border-r border-gray-100">
+                <div class="flex flex-col items-center justify-center gap-2 p-6 border-r border-gray-100 relative ${isHomeStreakTeam ? 'bg-blue-50/60 ring-2 ring-inset ring-blue-500' : ''}">
+                    ${isHomeStreakTeam ? `<div class="absolute top-2 left-2 text-[8px] font-black uppercase tracking-wider text-white bg-blue-600 px-1.5 py-0.5 rounded">Streak Team</div>` : ''}
                     <img src="${match.home.logo_url || ''}" class="w-14 h-14 object-contain" />
                     <div class="text-sm font-bold text-gray-800 text-center">${match.home.name}</div>
                     <div class="text-[11px] text-gray-400">Home &middot; <strong class="text-blue-600">${ordinal(match.home.position)} place</strong></div>
@@ -1528,7 +1643,8 @@ export const showStreakDetailView = async (streakId) => {
                     <div class="text-[11px] text-blue-600 font-semibold mt-0.5">${match.league.name}</div>
                 </div>
 
-                <div class="flex flex-col items-center justify-center gap-2 p-6 border-l border-r border-gray-100">
+                <div class="flex flex-col items-center justify-center gap-2 p-6 border-l border-r border-gray-100 relative ${isAwayStreakTeam ? 'bg-blue-50/60 ring-2 ring-inset ring-blue-500' : ''}">
+                    ${isAwayStreakTeam ? `<div class="absolute top-2 left-2 text-[8px] font-black uppercase tracking-wider text-white bg-blue-600 px-1.5 py-0.5 rounded">Streak Team</div>` : ''}
                     <img src="${match.away.logo_url || ''}" class="w-14 h-14 object-contain" />
                     <div class="text-sm font-bold text-gray-800 text-center">${match.away.name}</div>
                     <div class="text-[11px] text-gray-400">Away &middot; <strong class="text-blue-600">${ordinal(match.away.position)} place</strong></div>
@@ -1571,7 +1687,7 @@ export const showStreakDetailView = async (streakId) => {
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 mt-4 items-start">
             <div>
-                ${renderChartSection(data.chartData)}
+                ${BINARY_CHART_CONFIG[market.key] ? renderBinaryChartSection(data.chartData, BINARY_CHART_CONFIG[market.key], streak_count) : renderChartSection(data.chartData)}
                 ${renderMatchdayTable(data.home, data.away, market.label)}
                 ${renderTeamStatsSection(data.statistics, match, leagueStandings)}
             </div>
