@@ -18,6 +18,17 @@ const standingsService = require("./standings.service");
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const CHART_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// season_avg is a literal per-game average for every numeric market (goals,
+// corners, cards...), which needs no explanation. For the two boolean markets
+// it's actually an occurrence RATE of whichever side got encoded as 1 (see
+// pop-db.js) - 0.61 means nothing on its own without saying "61% odd" vs "61%
+// even". Keyed by streaksService's MARKET_MAP key (base.market.key), not the
+// raw db slug, since that's what's already resolved by the time this runs.
+const AVG_FOR_BY_MARKET_KEY = {
+    odd_even: 'odd',
+    both_teams_score: 'yes'
+};
+
 // Team Statistics widget - comparison stats only, deliberately NOT part of
 // STREAK_CHECK_SLUGS/TARGET_SLUGS (teams.service.js / streak-tracker.js), so
 // none of these ever get evaluated for streaks. team-clean-sheets stores a
@@ -144,7 +155,7 @@ function formatChartDate(isoDateStr) {
     return `${CHART_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
 
-async function buildTeamSide(teamId, seasonId, marketId, teamInfo) {
+async function buildTeamSide(teamId, seasonId, marketId, teamInfo, avgFor) {
     const [avgRow, streakRow, statRows] = await Promise.all([
         prisma.teamSeasonAverage.findFirst({
             where: { team_id: teamId, season_id: seasonId, market_id: marketId },
@@ -195,6 +206,11 @@ async function buildTeamSide(teamId, seasonId, marketId, teamInfo) {
     return {
         team: teamInfo,
         season_avg: avgRow ? Math.round(Number(avgRow.avg_value) * 100) / 100 : null,
+        // null for every numeric market (goals, corners, cards...) where
+        // season_avg is self-explanatory. Set only for oddeven/both-teams-score,
+        // where season_avg is an occurrence rate that's meaningless without
+        // saying which outcome it's the rate of - see AVG_FOR_BY_MARKET_KEY.
+        avg_for: avgFor ?? null,
         // Present regardless of length (even a 1-2 match streak, below the
         // >=3 floor that gets a team onto /streaks at all) - this is
         // supporting context for a matchup view, not a listing filter, so
@@ -217,9 +233,11 @@ const matchupService = {
             throw new AppError('Streak not found', 404);
         }
 
+        const avgFor = AVG_FOR_BY_MARKET_KEY[base.market.key];
+
         const [home, away, allOdds, similarStreaks, standingRows, statistics, leagueStandings] = await Promise.all([
-            buildTeamSide(match.home_team_id, match.season_id, base._marketId, base.match.home),
-            buildTeamSide(match.away_team_id, match.season_id, base._marketId, base.match.away),
+            buildTeamSide(match.home_team_id, match.season_id, base._marketId, base.match.home, avgFor),
+            buildTeamSide(match.away_team_id, match.season_id, base._marketId, base.match.away, avgFor),
             streaksService.getAllOddsForStreak(base),
             streaksService.getSimilarStreaks(base),
             prisma.teamStanding.findMany({
@@ -253,9 +271,9 @@ const matchupService = {
         // an equal number of games right before it started (context: what the pattern
         // looked like beforehand, including the game that would have broken an earlier
         // streak). .slice() naturally caps this at however many matches actually exist
-        // if the team hasn't played that many games yet. Reversed to chronological
-        // order for the chart's left-to-right x-axis.
-        const chartMatches = streakSide.matches.slice(0, base.streak_count * 2).slice().reverse();
+        // if the team hasn't played that many games yet. Left as most-recent-first so
+        // the chart's left-to-right x-axis reads latest match first.
+        const chartMatches = streakSide.matches.slice(0, base.streak_count * 2);
         const chartData = {
             title: `${base.market.label} per match`,
             subtitle: `${streakTeamName} - last ${chartMatches.length} games`,

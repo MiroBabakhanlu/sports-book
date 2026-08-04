@@ -10,6 +10,11 @@ const TARGET_SLUGS = [
     // 'team-goals-conceded',
     // 'team-corner-kicks-conceded',
     // 'team-yellow-cards-conceded'
+    // Boolean/categorical - 1/0 values, avg_value is an occurrence rate. The
+    // existing value-vs-average comparison below still works correctly for
+    // these (a 1 is always > any rate below 1, a 0 is always <), it just
+    // means "streak of the positive outcome" vs "streak of the negative one".
+    'oddeven', 'both-teams-score',
 ];
 
 // IF avg is a whole number:

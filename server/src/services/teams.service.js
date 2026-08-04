@@ -16,7 +16,12 @@ const SLUG_MAP = {
     'away-team-yellow-cards': 'team-yellow-cards',
     'team-red-cards': 'team-red-cards',
     'goals-overunder-first-half': 'total-goals-1st-half',
-    'goals-overunder-second-half': 'total-goals-2nd-half'
+    'goals-overunder-second-half': 'total-goals-2nd-half',
+    // No home/away split for these (match-level, not team-specific) and the
+    // odds provider's own slug already matches our canonical one, same as
+    // team-red-cards above - identity mapping, not missing a real one.
+    'oddeven': 'oddeven',
+    'both-teams-score': 'both-teams-score'
 };
 
 const STREAK_CHECK_SLUGS = [
@@ -29,7 +34,9 @@ const STREAK_CHECK_SLUGS = [
     'team-corner-kicks',
     'total-corner-kicks',
     'total-goals-1st-half',
-    'total-goals-2nd-half'
+    'total-goals-2nd-half',
+    'oddeven',
+    'both-teams-score'
 ];
 
 const teamsServices = {
@@ -197,6 +204,13 @@ const teamsServices = {
                     case 'total-goals-2nd-half':
                         matchValue = m.total_2nd_half;
                         break;
+                    case 'oddeven':
+                        // Match-level, not team-specific - same for both sides.
+                        matchValue = ((m.home_score ?? 0) + (m.away_score ?? 0)) % 2 === 1 ? 1 : 0;
+                        break;
+                    case 'both-teams-score':
+                        matchValue = ((m.home_score ?? 0) > 0 && (m.away_score ?? 0) > 0) ? 1 : 0;
+                        break;
                     default:
                         matchValue = 0;
                 }
@@ -211,6 +225,15 @@ const teamsServices = {
                     }
                 }
 
+                // Boolean markets: total_sum above still accumulates the numeric 1/0
+                // (so it reads as a meaningful occurrence count), but the per-match
+                // cell shown to the admin should read as the actual outcome, not a
+                // bare digit - 1 is genuinely ambiguous ("1 what?") the way it isn't
+                // for team-goals etc.
+                let displayValue = matchValue;
+                if (isFinished && slug === 'oddeven') displayValue = matchValue === 1 ? 'ODD' : 'EVEN';
+                else if (isFinished && slug === 'both-teams-score') displayValue = matchValue === 1 ? 'YES' : 'NO';
+
                 return {
                     id: m.id,
                     status: m.status,
@@ -218,7 +241,11 @@ const teamsServices = {
                     venue: isHome ? 'Home' : 'Away',
                     opponent: isHome ? m.awayTeam : m.homeTeam,
                     score: isFinished ? `${m.home_score} - ${m.away_score}` : 'vs',
-                    rawValue: matchValue
+                    rawValue: displayValue,
+                    // Client-side coloring (getColorForValue) needs the real number,
+                    // not the "ODD"/"YES" label - Number("ODD") is NaN, which would
+                    // silently fall through to the neutral/no-color branch.
+                    rawNumericValue: matchValue
                 };
             });
 

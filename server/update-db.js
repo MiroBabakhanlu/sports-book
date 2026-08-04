@@ -155,7 +155,8 @@ async function simplifiedUpdateOrchestrator() {
                                 'team-corner-kicks', 'total-corner-kicks',
                                 'total-goals-1st-half', 'total-goals-2nd-half',
                                 'team-goals-conceded',
-                                'team-goals-1st-half', 'team-goals-2nd-half', 'team-possession', 'team-shots', 'team-clean-sheets'
+                                'team-goals-1st-half', 'team-goals-2nd-half', 'team-possession', 'team-shots', 'team-clean-sheets',
+                                'oddeven', 'both-teams-score'
                             ]
                         }
                     }
@@ -242,6 +243,14 @@ async function simplifiedUpdateOrchestrator() {
                     } else if (market.slug === 'team-clean-sheets') {
                         await upsertMatchStat(match.id, homeTeam.id, market.id, awayGoals === 0 ? 1 : 0, 'home');
                         await upsertMatchStat(match.id, awayTeam.id, market.id, homeGoals === 0 ? 1 : 0, 'away');
+                    } else if (market.slug === 'oddeven') {
+                        const isOdd = (homeGoals + awayGoals) % 2 === 1 ? 1 : 0;
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, isOdd, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, isOdd, 'away');
+                    } else if (market.slug === 'both-teams-score') {
+                        const btts = (homeGoals > 0 && awayGoals > 0) ? 1 : 0;
+                        await upsertMatchStat(match.id, homeTeam.id, market.id, btts, 'home');
+                        await upsertMatchStat(match.id, awayTeam.id, market.id, btts, 'away');
                     }
                 }
             }

@@ -268,8 +268,20 @@ function calculateLeagueMarketCounts(insights) {
     return leagueMarketCounts;
 }
 
+// oddeven/both-teams-score are 1/0 outcomes, not numeric-vs-threshold - MatchOdds
+// for them is genuinely stored under 'odd'/'even'/'yes'/'no' (see pop-db.js /
+// odds-pipeline.js), not '<direction>-<val>' like every other market here.
+// OVER = the positive side (odd/yes) by the same convention used everywhere else.
+const BINARY_MARKET_OUTCOMES = {
+    'oddeven': { positive: 'odd', negative: 'even' },
+    'both-teams-score': { positive: 'yes', negative: 'no' }
+};
+
 const getOddForPrediction = (market, direction, val) => {
-    const searchStr = `${direction.toLowerCase()}-${val}`;
+    const binaryOutcomes = BINARY_MARKET_OUTCOMES[(market.marketSlug || '').toLowerCase()];
+    const searchStr = binaryOutcomes
+        ? (direction.toUpperCase() === 'OVER' ? binaryOutcomes.positive : binaryOutcomes.negative)
+        : `${direction.toLowerCase()}-${val}`;
     const found = market.odds?.find(o => o.selection.toLowerCase() === searchStr);
     return found ? found.odd : null;
 };

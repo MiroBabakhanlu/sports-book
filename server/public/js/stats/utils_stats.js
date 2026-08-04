@@ -55,9 +55,26 @@ export function calculateLeagueMarketCounts(insights) {
 
     return leagueMarketCounts;
 }
+// oddeven/both-teams-score are 1/0 outcomes, not numeric-vs-threshold - MatchOdds
+// for them is genuinely stored under 'odd'/'even'/'yes'/'no' (see pop-db.js /
+// odds-pipeline.js), not '<direction>-<val>' like every other market here.
+// OVER = the positive side (odd/yes) by the same convention used everywhere else.
+const BINARY_MARKET_OUTCOMES = {
+    'oddeven': { positive: 'odd', negative: 'even' },
+    'both-teams-score': { positive: 'yes', negative: 'no' }
+};
+
+const buildSelectionSearchStr = (marketSlug, direction, val) => {
+    const binaryOutcomes = BINARY_MARKET_OUTCOMES[(marketSlug || '').toLowerCase()];
+    if (binaryOutcomes) {
+        return direction.toUpperCase() === 'OVER' ? binaryOutcomes.positive : binaryOutcomes.negative;
+    }
+    return `${direction.toLowerCase()}-${val}`;
+};
+
 // ⭐ Updated to return the whole object instead of just the odd number
 export const getOddForPrediction = (market, direction, val) => {
-    const searchStr = `${direction.toLowerCase()}-${val}`;
+    const searchStr = buildSelectionSearchStr(market.marketSlug, direction, val);
     return market.odds?.find(o => o.selection.toLowerCase() === searchStr) || null;
 };
 
@@ -84,7 +101,7 @@ export function prepareInsightsData(result) {
 
             // Helper just to find the best odd to display on the main dashboard card
             const getBestOdd = (market, direction, val) => {
-                const searchStr = `${direction.toLowerCase()}-${val}`;
+                const searchStr = buildSelectionSearchStr(market.marketSlug, direction, val);
                 const matches = market.odds?.filter(o => o.selection.toLowerCase() === searchStr) || [];
                 matches.sort((a, b) => Number(b.odd) - Number(a.odd));
                 return matches[0] || null;

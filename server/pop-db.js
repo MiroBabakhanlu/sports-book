@@ -336,7 +336,9 @@ async function processLeague(leagueId, seasonYear) {
             // 'team-corner-kicks-conceded',
             // 'team-yellow-cards-conceded'
             // Team Statistics widget - not streak-eligible, comparison stats only
-            'team-goals-1st-half', 'team-goals-2nd-half', 'team-possession', 'team-shots', 'team-clean-sheets'
+            'team-goals-1st-half', 'team-goals-2nd-half', 'team-possession', 'team-shots', 'team-clean-sheets',
+            // Boolean/categorical - see team-clean-sheets comment below for how these work
+            'oddeven', 'both-teams-score'
         ];
 
         const dbMarkets = await tx.market.findMany({
@@ -554,6 +556,21 @@ async function processLeague(leagueId, seasonYear) {
                         // that back into a count (rate * matches_played) at read time.
                         await upsertMatchStat(tx, match.id, homeTeam.id, market.id, awayGoals === 0 ? 1 : 0, 'home');
                         await upsertMatchStat(tx, match.id, awayTeam.id, market.id, homeGoals === 0 ? 1 : 0, 'away');
+                    }
+                    else if (market.slug === 'oddeven') {
+                        // Match-level fact (not team-specific), same value written to
+                        // both sides - same pattern total-goals etc. already use.
+                        // 1 = total match goals were odd, 0 = even. avg_value = odd-rate.
+                        const isOdd = (homeGoals + awayGoals) % 2 === 1 ? 1 : 0;
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, isOdd, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, isOdd, 'away');
+                    }
+                    else if (market.slug === 'both-teams-score') {
+                        // Match-level fact, same value both sides. 1 = both teams
+                        // scored (BTTS yes), 0 = no. avg_value = BTTS-yes rate.
+                        const btts = (homeGoals > 0 && awayGoals > 0) ? 1 : 0;
+                        await upsertMatchStat(tx, match.id, homeTeam.id, market.id, btts, 'home');
+                        await upsertMatchStat(tx, match.id, awayTeam.id, market.id, btts, 'away');
                     }
                 }
             }

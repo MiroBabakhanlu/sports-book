@@ -66,10 +66,21 @@ const MARKET_MAP = {
     'team-corner-kicks': { key: 'team_corners', label: 'Team Corners' },
     'total-corner-kicks': { key: 'total_corners', label: 'Total Corners' },
     'total-goals-1st-half': { key: 'total_goals_1st_half', label: 'Total Goals 1st Half' },
-    'total-goals-2nd-half': { key: 'total_goals_2nd_half', label: 'Total Goals 2nd Half' }
+    'total-goals-2nd-half': { key: 'total_goals_2nd_half', label: 'Total Goals 2nd Half' },
+    'oddeven': { key: 'odd_even', label: 'Odd/Even' },
+    'both-teams-score': { key: 'both_teams_score', label: 'Both Teams to Score' }
 };
 const DB_MARKET_SLUGS = Object.keys(MARKET_MAP);
 const PUBLIC_MARKET_KEYS = Object.values(MARKET_MAP).map(m => m.key);
+
+// oddeven/both-teams-score are 1/0 outcomes, not numeric-vs-threshold - MatchOdds
+// for them is genuinely stored under 'odd'/'even'/'yes'/'no' (see pop-db.js /
+// odds-pipeline.js), not '<direction>-<threshold>' like every other market here.
+// 1 is always the "positive" side by the encoding these markets were built with.
+const BINARY_MARKET_OUTCOMES = {
+    'oddeven': { positive: 'odd', negative: 'even' },
+    'both-teams-score': { positive: 'yes', negative: 'no' }
+};
 
 // Derive canonical slug -> { home: rawSlug, away: rawSlug } from SLUG_MAP.
 // Side-specific raw slugs (total-home/total-away, home-corners-overunder/
@@ -327,13 +338,35 @@ async function buildRawCandidates() {
         const homeWin = pickBestOdd(match.matchOdds, matchWinnerId, 'home');
         const awayWin = pickBestOdd(match.matchOdds, matchWinnerId, 'away');
         const rawMarketId = resolveRawMarketId(bySlug, ts.market.slug, isHome);
-        const recommended = pickBestOdd(match.matchOdds, rawMarketId, `${direction}-${threshold}`);
+
+        // Boolean markets: MatchOdds is keyed by 'odd'/'even'/'yes'/'no', not
+        // '<direction>-<threshold>' - and "over 0.5" reads as nothing meaningful
+        // for a yes/no outcome anyway. suggestedOutcome/streakOutcome mirror the
+        // exact same reversion logic as direction above (ts.streak_direction ===
+        // 'below' -> suggest the positive side), just in the real vocabulary.
+        const binaryOutcomes = BINARY_MARKET_OUTCOMES[ts.market.slug];
+        const suggestedOutcome = binaryOutcomes
+            ? (ts.streak_direction === 'below' ? binaryOutcomes.positive : binaryOutcomes.negative)
+            : null;
+        const streakOutcome = binaryOutcomes
+            ? (ts.streak_direction === 'below' ? binaryOutcomes.negative : binaryOutcomes.positive)
+            : null;
+
+        const recommended = binaryOutcomes
+            ? pickBestOdd(match.matchOdds, rawMarketId, suggestedOutcome)
+            : pickBestOdd(match.matchOdds, rawMarketId, `${direction}-${threshold}`);
 
         candidates.push({
             id: `streak_${ts.id}`,
             streak_count: ts.streak_length,
             market: { key: marketMeta.key, label: marketMeta.label },
-            prediction: {
+            prediction: binaryOutcomes ? {
+                text: `${teamRow.name} — ${marketMeta.label}: ${suggestedOutcome.toUpperCase()}`,
+                threshold,
+                direction,
+                average: avgRounded,
+                description: `${teamRow.name} ${marketMeta.label.toLowerCase()}  has been ${streakOutcome.toUpperCase()} for the last ${ts.streak_length} matches (this season's ${binaryOutcomes.positive} rate: ${(avgRounded * 100).toFixed(1)}%).`
+            } : {
                 text: `${teamRow.name} ${marketMeta.label} ${direction} ${threshold}`,
                 threshold,
                 direction,
@@ -369,7 +402,12 @@ async function buildRawCandidates() {
             _marketId: ts.market_id,
             _rawMarketId: rawMarketId,
             _matchId: match.id,
-            _seasonId: ts.season_id
+            _seasonId: ts.season_id,
+            // getAllOddsForStreak needs to re-derive the exact same MatchOdds.slug
+            // this candidate was built with - can't recompute it from prediction.
+            // direction/threshold alone for binary markets (the real selection slug
+            // is 'odd'/'even'/'yes'/'no', unrelated to those two fields).
+            _recommendedSelectionSlug: binaryOutcomes ? suggestedOutcome : `${direction}-${threshold}`
         });
     }
 
@@ -387,7 +425,7 @@ async function getRawCandidates() {
 }
 
 function stripInternal(item) {
-    const { _kickoffAt, _teamStreakId, _teamId, _marketId, _rawMarketId, _matchId, _seasonId, ...rest } = item;
+    const { _kickoffAt, _teamStreakId, _teamId, _marketId, _rawMarketId, _matchId, _seasonId, _recommendedSelectionSlug, ...rest } = item;
     return rest;
 }
 
@@ -588,8 +626,11 @@ const streaksService = {
     // for this exact prediction line", so the DB query and bookmaker-logo lookup live
     // in one place instead of two.
     getAllOddsForStreak: async (base) => {
-        const direction = base.prediction.direction;
-        const threshold = base.prediction.threshold;
+        // Not `${direction}-${threshold}` directly - for binary markets (oddeven,
+        // both-teams-score) the real MatchOdds.slug is 'odd'/'even'/'yes'/'no',
+        // which prediction.direction/threshold don't encode. _recommendedSelectionSlug
+        // is the exact slug this candidate was actually built/matched against.
+        const selectionSlug = base._recommendedSelectionSlug ?? `${base.prediction.direction}-${base.prediction.threshold}`;
 
         // base._rawMarketId can be null (e.g. no raw provider slug resolves for this
         // canonical market/side combo yet) - Prisma throws PrismaClientValidationError
@@ -604,7 +645,7 @@ const streaksService = {
                             // See buildRawCandidates(): MatchOdds is keyed by the raw
                             // provider market id, not the canonical one.
                             market_id: base._rawMarketId,
-                            slug: `${direction}-${threshold}`,
+                            slug: selectionSlug,
                             bookmaker: { is_active: true }
                         },
                         select: {

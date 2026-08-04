@@ -47,6 +47,16 @@ async function main() {
         { name: 'Team Possession', slug: 'team-possession', scope: 'team', description: 'Ball possession percentage for a specific team' },
         { name: 'Team Shots', slug: 'team-shots', scope: 'team', description: 'Total shots taken by a specific team' },
         { name: 'Team Clean Sheets', slug: 'team-clean-sheets', scope: 'team', description: 'Per-match 1/0 - whether a specific team conceded zero goals that match' },
+
+        // Boolean/categorical markets - no numeric threshold, avg_value ends up being
+        // an occurrence RATE (same trick as team-clean-sheets above), and the streak
+        // is "N consecutive matches with the same 1/0 outcome" rather than "N
+        // consecutive matches over/under a line". 1 = the "positive" side of the
+        // pair, chosen explicitly so avg_value has one unambiguous meaning:
+        //   oddeven:          1 = total match goals were ODD, 0 = EVEN. avg_value = odd-rate.
+        //   both-teams-score: 1 = both teams scored (BTTS yes), 0 = no. avg_value = BTTS-yes rate.
+        { name: 'Odd/Even', slug: 'oddeven', scope: 'team', description: 'Per-match 1/0 - whether total match goals were odd (1) or even (0)' },
+        { name: 'Both Teams Score', slug: 'both-teams-score', scope: 'team', description: 'Per-match 1/0 - whether both teams scored in that match' },
     ];
 
     for (const market of coreMarkets) {

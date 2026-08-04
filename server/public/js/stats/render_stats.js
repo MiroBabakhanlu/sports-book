@@ -39,7 +39,15 @@ export function renderTeamDashboard(data, teamId, teamName) {
             team_corners: m.home_team_id === teamId ? m.home_corners : m.away_corners,
             total_corners: (m.home_corners !== null && m.away_corners !== null) ? m.home_corners + m.away_corners : null,
             total_goals_1st_half: m.total_1st_half,
-            total_goals_2nd_half: m.total_2nd_half
+            total_goals_2nd_half: m.total_2nd_half,
+            // Match-level (not team-specific), derived straight from the score -
+            // same formula pop-db.js uses when it writes these to the DB.
+            team_odd_even: (m.home_score !== null && m.away_score !== null)
+                ? (((m.home_score ?? 0) + (m.away_score ?? 0)) % 2 === 1 ? 1 : 0)
+                : null,
+            both_teams_score: (m.home_score !== null && m.away_score !== null)
+                ? (((m.home_score ?? 0) > 0 && (m.away_score ?? 0) > 0) ? 1 : 0)
+                : null
         };
     });
 
@@ -372,6 +380,16 @@ export function renderInsightsDashboard(insights) {
         'team-red-cards': 'TEAM RED CARDS',
         'goals-overunder-first-half': 'TOTAL GOALS 1ST HALF',
         'goals-overunder-second-half': 'TOTAL GOALS 2ND HALF',
+        'oddeven': 'ODD/EVEN',
+        'both-teams-score': 'BOTH TEAMS TO SCORE',
+    };
+
+    // Boolean/categorical markets have no numeric threshold, so "OVER 0.5" /
+    // "UNDER 0.5" (what the generic over/under template would otherwise show)
+    // doesn't read as anything meaningful - swap in the real outcome labels.
+    const BINARY_MARKET_LABELS = {
+        'oddeven': { OVER: 'ODD', UNDER: 'EVEN' },
+        'both-teams-score': { OVER: 'YES', UNDER: 'NO' },
     };
 
     const getMarketLabel = (slug) =>
@@ -794,7 +812,19 @@ export function renderInsightsDashboard(insights) {
                 ` : paginatedInsights.map((i, index) => {
             const marketName = getMarketLabel(i.market.marketSlug)
             const teamName = i.isHome ? i.match.homeTeam.name : i.match.awayTeam.name;
-            const fullPrediction = `${i.direction} ${i.suggestedValue}`;
+            const binaryLabels = BINARY_MARKET_LABELS[(i.market.marketSlug || '').toLowerCase()];
+            // i.direction is already the SUGGESTED bet - the opposite of what the
+            // streak has actually been doing (same reversion-to-mean convention every
+            // other market uses: predict OVER because the team's been running UNDER).
+            // So the sentence describing the streak itself needs the opposite label,
+            // not i.direction directly - that's what was showing e.g. "has been EVEN"
+            // right next to a prediction that *also* said EVEN, which can't both be true.
+            const fullPrediction = binaryLabels ? binaryLabels[i.direction] : `${i.direction} ${i.suggestedValue}`;
+            const streakLabel = binaryLabels ? binaryLabels[i.direction === 'OVER' ? 'UNDER' : 'OVER'] : null;
+            // avgValue is always the rate of the "positive" outcome (odd / yes) by
+            // definition (see pop-db.js) - label it with that outcome specifically,
+            // not whatever the current prediction happens to be, or the % is ambiguous.
+            const positiveRateLabel = binaryLabels ? binaryLabels.OVER : null;
             const leagueLabel = i.match.league?.name || i.match.league_name || '';
 
             return `
@@ -855,7 +885,10 @@ export function renderInsightsDashboard(insights) {
                                         ` : ''}
                                     </div>
                                     <p class="text-[10px] text-gray-500 italic">
-                                        In the last <b>${i.streakCount}</b> matches, <b>${marketName} </b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(3)}</b>.
+                                        ${binaryLabels
+                    ? `<b>${teamName}</b>  <b>${marketName} </b>   has been  <b>${streakLabel}</b> for <b>${i.streakCount}</b> matches in a row `
+                    : `In the last <b>${i.streakCount}</b> matches, <b>${marketName} </b> of <b>${teamName}</b> were ${i.direction == 'OVER' ? 'under' : 'over'} average of <b>${i.avgValue.toFixed(3)}</b>.`
+                }
                                         ${i.confidence != null ? `<span class="not-italic font-bold text-blue-600 ml-1">Confidence: ${Number(i.confidence).toFixed(3)}%</span>` : ''}
                                     </p>
                                 </div>
@@ -1279,6 +1312,12 @@ function renderMatchdayTable(home, away, marketLabel) {
     const maxLength = Math.min(20, Math.max(home.matches.length, away.matches.length));
     if (maxLength === 0) return '';
 
+    // avg_for is set by the backend only for oddeven/both-teams-score (see
+    // matchup.service.js) - season_avg there is an occurrence rate, not a
+    // literal average, so the column header needs to say what it's a rate OF.
+    const avgFor = home.avg_for ?? away.avg_for ?? null;
+    const avgHeaderLabel = avgFor ? `Avg (${avgFor})` : 'Avg';
+
     // Same right-aligned padding renderMarketComparisonTable already used: both rows
     // share one set of columns, most recent on the left. A team with fewer games
     // played (games in hand, joined a competition later, etc.) gets '-' padded into
@@ -1324,7 +1363,7 @@ function renderMatchdayTable(home, away, marketLabel) {
                     <thead>
                         <tr class="bg-gray-50 border-b border-gray-100">
                             <th class="text-left px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400 sticky left-0 bg-gray-50">Team</th>
-                            <th class="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">Avg</th>
+                            <th class="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">${avgHeaderLabel}</th>
                             <th class="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">Streak</th>
                             ${headerCells}
                         </tr>
@@ -1639,8 +1678,10 @@ export function renderMarketComparisonTable(teamA, teamB) {
 
                 const rawValue = m.rawValue;
 
+                // rawNumericValue is what color-coding needs (Number("ODD") is NaN) -
+                // falls back to rawValue for markets that never set it.
                 const cellClass = getColorForValue(
-                    rawValue,
+                    m.rawNumericValue ?? rawValue,
                     teamAvg?.avg_value ?? 0
                 );
 
@@ -1788,43 +1829,53 @@ export function openTableView() {
 
         reversedMatches.forEach(match => {
             let rawValue = '-';
+            let colorValue = '-'; // numeric value for getColorForValue - separate from
+            // rawValue for boolean markets, since "ODD"/"YES" isn't a Number().
 
             switch (slug) {
                 case 'team-goals':
-                    rawValue = match.team_goals ?? '-';
+                    rawValue = colorValue = match.team_goals ?? '-';
                     break;
                 case 'total-goals':
-                    rawValue = match.total_goals ?? '-';
+                    rawValue = colorValue = match.total_goals ?? '-';
                     break;
                 case 'team-yellow-cards':
-                    rawValue = match.team_yellows ?? '-';
+                    rawValue = colorValue = match.team_yellows ?? '-';
                     break;
                 case 'total-yellow-cards':
-                    rawValue = match.total_yellows ?? '-';
+                    rawValue = colorValue = match.total_yellows ?? '-';
                     break;
                 case 'team-red-cards':
-                    rawValue = match.team_reds ?? '-';
+                    rawValue = colorValue = match.team_reds ?? '-';
                     break;
                 case 'total-red-cards':
-                    rawValue = match.total_reds ?? '-';
+                    rawValue = colorValue = match.total_reds ?? '-';
                     break;
                 case 'team-corner-kicks':
-                    rawValue = match.team_corners ?? '-';
+                    rawValue = colorValue = match.team_corners ?? '-';
                     break;
                 case 'total-corner-kicks':
-                    rawValue = match.total_corners ?? '-';
+                    rawValue = colorValue = match.total_corners ?? '-';
                     break;
                 case 'total-goals-1st-half':
-                    rawValue = match.total_goals_1st_half ?? '-';
+                    rawValue = colorValue = match.total_goals_1st_half ?? '-';
                     break;
                 case 'total-goals-2nd-half':
-                    rawValue = match.total_goals_2nd_half ?? '-';
+                    rawValue = colorValue = match.total_goals_2nd_half ?? '-';
+                    break;
+                case 'oddeven':
+                    colorValue = match.team_odd_even;
+                    rawValue = match.team_odd_even === 1 ? 'ODD' : (match.team_odd_even === 0 ? 'EVEN' : '-');
+                    break;
+                case 'both-teams-score':
+                    colorValue = match.both_teams_score;
+                    rawValue = match.both_teams_score === 1 ? 'YES' : (match.both_teams_score === 0 ? 'NO' : '-');
                     break;
                 default:
                     rawValue = '-';
             }
 
-            const cellClass = getColorForValue(rawValue, avgValue);
+            const cellClass = getColorForValue(colorValue, avgValue);
 
             tableHTML += `
                 <td class="text-center py-3 px-2 font-mono text-xs matchday-cell ${cellClass}">
