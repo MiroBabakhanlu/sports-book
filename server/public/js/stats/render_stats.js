@@ -1084,18 +1084,23 @@ const BINARY_CHART_CONFIG = {
     odd_even: { positive: 'ODD', negative: 'EVEN' },
     both_teams_score: { positive: 'YES', negative: 'NO' }
 };
+// side.avg_for ('odd'/'yes', see matchup.service.js) -> the positive/negative
+// label pair, keyed the other way round from BINARY_CHART_CONFIG since
+// renderMatchdayTable only has avg_for to go on, not the market key.
+const BINARY_LABELS_BY_AVG_FOR = {
+    odd: { 1: 'ODD', 0: 'EVEN' },
+    yes: { 1: 'YES', 0: 'NO' }
+};
 // Same blue/red pair the rest of the app already uses for over/under average
 // (buildChartSVG below, the confidence ring, renderMatchdayTable).
 const CHART_BLUE = '#2563eb';
 const CHART_ROSE = '#ef4444';
 
-// chartData.data is most-recent-first (see matchup.service.js) so every other
-// chart/table on this page reads latest-first; this one specifically wants
-// oldest-to-newest left-to-right (matches the "latest" label sitting on the
-// rightmost point), so it reverses its own local copy rather than the shared one.
+// chartData.data is most-recent-first (see matchup.service.js), matching every
+// other chart/table on this page - latest match is index 0, drawn leftmost.
 function buildTwoLaneTrackSVG(chartData, config, streakCount) {
-    const chronological = chartData.data.slice().reverse();
-    const n = chronological.length;
+    const points_ = chartData.data;
+    const n = points_.length;
     if (n === 0) return '';
 
     const slot = 68;
@@ -1106,12 +1111,12 @@ function buildTwoLaneTrackSVG(chartData, config, streakCount) {
     const width = padLeft + padRight + slot * Math.max(n - 1, 1) + 20;
     const height = padTop + laneGap + 46 + padBottom;
 
-    // The streak always sits against the most recent (rightmost) point here -
+    // The streak always sits against the most recent (leftmost) point here -
     // that's the one fixed anchor streak-tracker.js counts backward from - so
-    // the highlighted run is always the last `streakCount` points chronologically.
-    const streakStart = Math.max(0, n - streakCount);
-    const lastValue = Number(chronological[n - 1].value);
-    const streakIsPositive = lastValue === 1;
+    // the highlighted run is always the first `streakCount` points.
+    const streakEnd = Math.min(n, streakCount);
+    const latestValue = Number(points_[0].value);
+    const streakIsPositive = latestValue === 1;
     const streakColor = streakIsPositive ? CHART_BLUE : CHART_ROSE;
 
     const laneBands = `
@@ -1121,11 +1126,11 @@ function buildTwoLaneTrackSVG(chartData, config, streakCount) {
         <text x="${padLeft - 24}" y="${bottomLaneY + 3}" font-size="11" font-weight="800" fill="${CHART_ROSE}" text-anchor="end">${config.negative}</text>
     `;
 
-    const points = chronological.map((d, i) => {
+    const points = points_.map((d, i) => {
         const x = padLeft + slot * i;
         const isPositive = Number(d.value) === 1;
         const y = isPositive ? topLaneY : bottomLaneY;
-        return { x, y, isPositive, date: d.date, inStreak: i >= streakStart };
+        return { x, y, isPositive, date: d.date, inStreak: i < streakEnd };
     });
 
     const segments = [];
@@ -1138,15 +1143,15 @@ function buildTwoLaneTrackSVG(chartData, config, streakCount) {
     }
 
     const dots = points.map((p, i) => {
-        const isLast = i === points.length - 1;
+        const isLatest = i === 0;
         const laneColor = p.isPositive ? CHART_BLUE : CHART_ROSE;
-        const r = isLast ? 9 : (p.inStreak ? 7 : 5.5);
+        const r = isLatest ? 9 : (p.inStreak ? 7 : 5.5);
         const fill = p.inStreak ? laneColor : '#ffffff';
-        const ring = isLast && p.inStreak
+        const ring = isLatest && p.inStreak
             ? `<circle cx="${p.x}" cy="${p.y}" r="${r + 4}" fill="none" stroke="${laneColor}" stroke-width="2" opacity="0.35"/>`
             : '';
         const dateLabel = `<text x="${p.x}" y="${bottomLaneY + 46}" font-size="9" fill="#94a3b8" text-anchor="middle">${p.date}</text>`;
-        const latestLabel = isLast
+        const latestLabel = isLatest
             ? `<text x="${p.x}" y="${bottomLaneY + 58}" font-size="9" font-weight="700" fill="#2563eb" text-anchor="middle">latest</text>`
             : '';
         return `
@@ -1157,9 +1162,8 @@ function buildTwoLaneTrackSVG(chartData, config, streakCount) {
     }).join('');
 
     // Badge sits above the midpoint of the highlighted streak segment, which is
-    // always the tail end (rightmost points) since the streak is anchored to the
-    // most recent match.
-    const badgeMidX = (points[streakStart].x + points[n - 1].x) / 2;
+    // always the leftmost points since the streak is anchored to the most recent match.
+    const badgeMidX = (points[0].x + points[streakEnd - 1].x) / 2;
     const badgeText = `CURRENT STREAK: ${streakCount}`;
     const badgeWidth = 34 + badgeText.length * 5.6;
     const badge = streakCount > 0 ? `
@@ -1441,12 +1445,14 @@ function renderMatchdayTable(home, away, marketLabel) {
 
     const renderRow = (side) => {
         const startIndex = maxLength - side.matches.length;
+        const binaryLabels = side.avg_for ? BINARY_LABELS_BY_AVG_FOR[side.avg_for] : null;
         const cells = Array.from({ length: maxLength }, (_, i) => {
             const m = i >= startIndex ? side.matches[i - startIndex] : null;
             if (!m) return `<td class="text-center px-2.5 py-2 text-xs text-gray-300">-</td>`;
             const isOver = side.season_avg !== null && m.value > side.season_avg;
             const cls = isOver ? 'text-blue-600 bg-blue-50' : 'text-red-600 bg-red-50';
-            return `<td class="text-center px-2.5 py-2"><span class="inline-block min-w-[22px] px-1.5 py-0.5 rounded text-xs font-bold ${cls}">${m.value}</span></td>`;
+            const display = binaryLabels ? binaryLabels[m.value] : m.value;
+            return `<td class="text-center px-2.5 py-2"><span class="inline-block min-w-[22px] px-1.5 py-0.5 rounded text-xs font-bold ${cls}">${display}</span></td>`;
         }).join('');
 
         return `

@@ -262,7 +262,7 @@ const matchupService = {
         // chartData is single-team (whichever side the streak actually belongs to),
         // not both teams like home/away above - mirrors the mockup's
         // "<Team> - last N games" bar chart, which only ever shows one team's trend.
-        const isHomeStreak = match.home_team_id === base._teamId;
+        const isHomeStreak = base.streak_side === 'home';
         const streakSide = isHomeStreak ? home : away;
         const streakTeamName = isHomeStreak ? base.match.home.name : base.match.away.name;
 

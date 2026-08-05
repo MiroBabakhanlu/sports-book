@@ -360,6 +360,10 @@ async function buildRawCandidates() {
             id: `streak_${ts.id}`,
             streak_count: ts.streak_length,
             market: { key: marketMeta.key, label: marketMeta.label },
+            // Both teams are shown side by side on a streak card, but the
+            // streak/prediction is only actually about one of them - the
+            // frontend needs this to know which column to highlight.
+            streak_side: isHome ? 'home' : 'away',
             prediction: binaryOutcomes ? {
                 text: `${teamRow.name} — ${marketMeta.label}: ${suggestedOutcome.toUpperCase()}`,
                 threshold,
