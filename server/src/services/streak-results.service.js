@@ -155,9 +155,17 @@ const streakResultsService = {
     // KPIs + calibration + market-performance all read the same filtered set,
     // matching the admin mockup's "Filters applied to table and KPIs above" -
     // one call computes everything so the UI never has to reconcile 4
-    // separately-filtered responses.
+    // separately-filtered responses. The `outcome` filter is deliberately
+    // excluded here (it only narrows the table below) - otherwise
+    // buildWhere() already sets where.result to the selected outcome, and
+    // spreading {...where, result: 'hit'} for the hit-count query would
+    // silently overwrite that back to 'hit' regardless of which tab was
+    // selected, making "hit rate" meaningless whenever a Hit/Miss/Push
+    // filter was active (e.g. Miss showing a nonzero hit rate, Hit showing
+    // >100%, since numerator and denominator ended up built from two
+    // different, disconnected filter sets).
     getStreakResultsSummary: async (filters) => {
-        const where = buildWhere(filters);
+        const where = buildWhere({ ...filters, outcome: undefined });
 
         const [settledCount, hitCount, pushCount, avgConfidence, longestStreak] = await Promise.all([
             prisma.streakResult.count({ where }),

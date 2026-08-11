@@ -159,7 +159,7 @@ app.listen(port, async () => {
         // startStreakWorker(correctLeagues);
         startStreakSyncScheduler();
         // backfillStreakResults(30);
-        fixPushResults();
+        // fixPushResults();
 
         // require('./update-db');
     } catch (err) {
