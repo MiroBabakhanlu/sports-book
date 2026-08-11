@@ -992,7 +992,7 @@ function srRenderSummary(summary) {
     kpis.innerHTML = [
         srKpiCard('Settled streaks', summary.settled_count, 'text-teal-600'),
         srKpiCard('Overall hit rate', `${summary.hit_rate}%`, summary.hit_rate >= 50 ? 'text-green-600' : 'text-red-600'),
-        srKpiCard('Calibration gap', `${summary.calibration_gap > 0 ? '+' : ''}${summary.calibration_gap}pts`, 'text-amber-600', `predicted ${summary.predicted_confidence}% &middot; actual ${summary.hit_rate}%`),
+        srKpiCard('Gap between confidence and the hit rate', `${summary.calibration_gap > 0 ? '+' : ''}${summary.calibration_gap}pts`, 'text-amber-600', `predicted ${summary.predicted_confidence}% &middot; actual ${summary.hit_rate}%`),
         srKpiCard('Longest held streak', summary.longest_streak ? summary.longest_streak.streak_count : '—', 'text-teal-600', summary.longest_streak ? `${summary.longest_streak.team} &middot; ${summary.longest_streak.market}` : '')
     ].join('');
 
@@ -1011,7 +1011,6 @@ function srRenderSummary(summary) {
                 </div>
                 <div class="text-right text-xs">
                     <b class="${gapColor}">${band.actual}%</b>
-                    <div class="text-[10px] text-gray-400">target ${band.predicted}%</div>
                 </div>
             </div>
         `;
