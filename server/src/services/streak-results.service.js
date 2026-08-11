@@ -3,8 +3,12 @@ const { prisma } = require("../utils/prisma");
 // Admin-only analytics over StreakResult (see streak-sync-scheduler.js's
 // captureStreakResults - one row per streak that was shown as an upcoming
 // prediction, written the moment its match finished). Every row already has
-// a final result (hit/miss) by construction - there's no pending/void state
-// here, since a row is never created until the match actually has a score.
+// a final result (hit/miss/push) by construction - there's no pending/void
+// state here, since a row is never created until the match actually has a
+// score. "push" is a real resolved outcome (a whole-number line landing
+// exactly on the threshold - stake back, no win, no loss in betting terms),
+// distinct from a miss - it's excluded from hit-rate/calibration math below
+// since it's neither a win nor a loss.
 
 const SORT_MAP = {
     date_desc: [{ match: { kickoff_at: 'desc' } }],
@@ -28,7 +32,7 @@ const CONFIDENCE_BANDS = [
 function buildWhere(filters) {
     const where = {};
 
-    if (filters.outcome === 'hit' || filters.outcome === 'miss') {
+    if (filters.outcome === 'hit' || filters.outcome === 'miss' || filters.outcome === 'push') {
         where.result = filters.outcome;
     }
     if (filters.confidence_min) {
@@ -117,6 +121,7 @@ function serializeRow(row) {
                 ? `${actualOutcome.toUpperCase()} (${row.match.home_score}-${row.match.away_score})`
                 : `${actualOutcome.toUpperCase()} (${row.match.home_score + row.match.away_score} goals)`)
             : `${row.actual_value} ${row.market.slug.includes('card') ? (Number(row.actual_value) === 1 ? 'card' : 'cards') : row.market.slug.includes('corner') ? 'corners' : (Number(row.actual_value) === 1 ? 'goal' : 'goals')}`,
+        avg_value: row.avg_value != null ? Number(row.avg_value) : null,
         odds_value: row.odds_value != null ? Number(row.odds_value) : null,
         odds_bookmaker: row.odds_bookmaker,
         result: row.result
@@ -154,9 +159,10 @@ const streakResultsService = {
     getStreakResultsSummary: async (filters) => {
         const where = buildWhere(filters);
 
-        const [settledCount, hitCount, avgConfidence, longestStreak] = await Promise.all([
+        const [settledCount, hitCount, pushCount, avgConfidence, longestStreak] = await Promise.all([
             prisma.streakResult.count({ where }),
             prisma.streakResult.count({ where: { ...where, result: 'hit' } }),
+            prisma.streakResult.count({ where: { ...where, result: 'push' } }),
             prisma.streakResult.aggregate({ where, _avg: { confidence: true } }),
             prisma.streakResult.findFirst({
                 where,
@@ -165,42 +171,54 @@ const streakResultsService = {
             })
         ]);
 
-        const hitRate = settledCount > 0 ? (hitCount / settledCount) * 100 : 0;
+        // Pushes are neither a win nor a loss, so they come out of the
+        // decided-outcomes denominator entirely rather than counting against
+        // the hit rate the way a miss does.
+        const decidedCount = settledCount - pushCount;
+        const hitRate = decidedCount > 0 ? (hitCount / decidedCount) * 100 : 0;
         const predictedConfidence = avgConfidence._avg.confidence != null ? Number(avgConfidence._avg.confidence) : 0;
 
         const calibration = await Promise.all(CONFIDENCE_BANDS.map(async (band) => {
             const bandWhere = { ...where, confidence: { gte: band.min, lt: band.max } };
-            const [count, hits, avgPredicted] = await Promise.all([
+            const [count, hits, pushes, avgPredicted] = await Promise.all([
                 prisma.streakResult.count({ where: bandWhere }),
                 prisma.streakResult.count({ where: { ...bandWhere, result: 'hit' } }),
+                prisma.streakResult.count({ where: { ...bandWhere, result: 'push' } }),
                 prisma.streakResult.aggregate({ where: bandWhere, _avg: { confidence: true } })
             ]);
+            const bandDecided = count - pushes;
             return {
                 label: band.label,
                 count,
                 predicted: avgPredicted._avg.confidence != null ? Number(avgPredicted._avg.confidence) : null,
-                actual: count > 0 ? (hits / count) * 100 : null
+                actual: bandDecided > 0 ? (hits / bandDecided) * 100 : null
             };
         }));
 
         const marketTotals = await prisma.streakResult.groupBy({ by: ['market_id'], where, _count: true });
         const marketHits = await prisma.streakResult.groupBy({ by: ['market_id'], where: { ...where, result: 'hit' }, _count: true });
+        const marketPushes = await prisma.streakResult.groupBy({ by: ['market_id'], where: { ...where, result: 'push' }, _count: true });
         const hitsByMarket = new Map(marketHits.map(m => [m.market_id, m._count]));
+        const pushesByMarket = new Map(marketPushes.map(m => [m.market_id, m._count]));
         const marketRows = marketTotals.length
             ? await prisma.market.findMany({ where: { id: { in: marketTotals.map(m => m.market_id) } } })
             : [];
         const marketById = new Map(marketRows.map(m => [m.id, m]));
 
         const marketPerformance = marketTotals
-            .map(m => ({
-                market: marketById.get(m.market_id)?.name ?? 'Unknown',
-                count: m._count,
-                hit_rate: m._count > 0 ? ((hitsByMarket.get(m.market_id) ?? 0) / m._count) * 100 : 0
-            }))
+            .map(m => {
+                const decided = m._count - (pushesByMarket.get(m.market_id) ?? 0);
+                return {
+                    market: marketById.get(m.market_id)?.name ?? 'Unknown',
+                    count: m._count,
+                    hit_rate: decided > 0 ? ((hitsByMarket.get(m.market_id) ?? 0) / decided) * 100 : 0
+                };
+            })
             .sort((a, b) => b.hit_rate - a.hit_rate);
 
         return {
             settled_count: settledCount,
+            push_count: pushCount,
             hit_rate: Math.round(hitRate * 10) / 10,
             predicted_confidence: Math.round(predictedConfidence * 10) / 10,
             calibration_gap: Math.round((hitRate - predictedConfidence) * 10) / 10,

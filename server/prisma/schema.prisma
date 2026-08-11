@@ -348,7 +348,7 @@ model StreakResult {
   odds_value        Decimal?
   odds_bookmaker    String?
   actual_value      Decimal // the market's real value in the finished match
-  result            String // 'hit' | 'miss'
+  result            String // 'hit' | 'miss' | 'push' (whole-number line landed exactly on the threshold - stake back, no win, no loss)
   created_at        DateTime @default(now())
 
   match  Match  @relation(fields: [match_id], references: [id])

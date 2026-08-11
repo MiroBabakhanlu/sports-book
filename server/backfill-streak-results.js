@@ -203,6 +203,12 @@ async function backfillStreakResults(daysBack = LOOKBACK_DAYS) {
                     predictedOutcome = pointInTimeDirection === 'below' ? binary.positive : binary.negative;
                     const actualOutcome = actualValue === 1 ? binary.positive : binary.negative;
                     result = actualOutcome === predictedOutcome ? 'hit' : 'miss';
+                } else if (actualValue === threshold) {
+                    // Whole-number line landed on exactly - a push (stake back,
+                    // no win, no loss), not a loss. Only possible when threshold
+                    // is a whole number - a .5 threshold can never tie an integer
+                    // actual value.
+                    result = 'push';
                 } else {
                     result = direction === 'over' ? (actualValue > threshold ? 'hit' : 'miss') : (actualValue < threshold ? 'hit' : 'miss');
                 }

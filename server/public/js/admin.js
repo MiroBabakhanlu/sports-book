@@ -935,11 +935,11 @@ function srBuildParams() {
 
 function srRenderOutcomeSeg() {
     const seg = document.getElementById('sr-outcome-seg');
-    const options = [['all', 'All'], ['hit', 'Hit'], ['miss', 'Miss']];
+    const options = [['all', 'All'], ['hit', 'Hit'], ['miss', 'Miss'], ['push', 'Push']];
     seg.innerHTML = options.map(([value, label]) => {
         const on = srFilters.outcome === value;
         const colorClass = on
-            ? (value === 'hit' ? 'bg-green-600 text-white' : value === 'miss' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white')
+            ? (value === 'hit' ? 'bg-green-600 text-white' : value === 'miss' ? 'bg-red-600 text-white' : value === 'push' ? 'bg-amber-500 text-white' : 'bg-gray-900 text-white')
             : 'bg-white text-gray-600 hover:bg-gray-50';
         return `<span data-outcome="${value}" class="px-3 py-1.5 cursor-pointer border-r border-gray-200 last:border-r-0 ${colorClass}">${label}</span>`;
     }).join('');
@@ -1001,6 +1001,18 @@ function srRenderSummary(summary) {
         if (band.count === 0) {
             return `<div class="flex items-center gap-3 text-xs text-gray-300 italic">${band.label} &mdash; no settled streaks</div>`;
         }
+        // band.actual is null when every row in this band is a push - there's
+        // no decided (hit/miss) outcome to calibrate against, so show a
+        // placeholder instead of literally rendering "null%".
+        if (band.actual == null) {
+            return `
+                <div class="grid grid-cols-[70px_1fr_90px] items-center gap-3">
+                    <div class="text-xs font-semibold text-gray-700">${band.label}<div class="text-[10px] text-gray-400 font-normal">${band.count} streaks</div></div>
+                    <div class="h-5 bg-gray-100 rounded"></div>
+                    <div class="text-right text-xs text-gray-400">&mdash;</div>
+                </div>
+            `;
+        }
         const gap = band.actual - band.predicted;
         const gapColor = Math.abs(gap) <= 3 ? 'text-green-600' : 'text-red-600';
         return `
@@ -1035,9 +1047,9 @@ function srRenderSummary(summary) {
 }
 
 function srResultBadge(result) {
-    return result === 'hit'
-        ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-green-50 border border-green-200 text-green-700">HIT</span>`
-        : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 border border-red-200 text-red-600">MISS</span>`;
+    if (result === 'hit') return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-green-50 border border-green-200 text-green-700">HIT</span>`;
+    if (result === 'push') return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 border border-amber-200 text-amber-600">PUSH</span>`;
+    return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 border border-red-200 text-red-600">MISS</span>`;
 }
 
 function srRenderTable(result) {
@@ -1053,7 +1065,7 @@ function srRenderTable(result) {
     }
 
     tbody.innerHTML = result.items.map(row => `
-        <tr class="border-b border-gray-100 last:border-b-0 ${row.result === 'miss' ? 'bg-red-50/30' : ''} hover:bg-gray-50">
+        <tr class="border-b border-gray-100 last:border-b-0 ${row.result === 'miss' ? 'bg-red-50/30' : row.result === 'push' ? 'bg-amber-50/30' : ''} hover:bg-gray-50">
             <td class="py-2.5 px-4 text-xs text-gray-500 whitespace-nowrap">
                 <b class="block text-gray-700">${new Date(row.match.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}</b>
                 ${new Date(row.match.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
@@ -1069,8 +1081,11 @@ function srRenderTable(result) {
             <td class="py-2.5 px-4 text-center font-extrabold text-teal-600">${row.streak_count}</td>
             <td class="py-2.5 px-4 text-xs font-bold text-gray-700">${row.confidence != null ? row.confidence.toFixed(1) + '%' : '—'}</td>
             <td class="py-2.5 px-4 text-xs whitespace-nowrap">
-                <span class="text-gray-400">${row.prediction}</span> &rarr;
-                <span class="font-bold ${row.result === 'hit' ? 'text-green-600' : 'text-red-600'}">${row.actual}</span>
+                <div>
+                    <span class="text-gray-400">${row.prediction}</span> &rarr;
+                    <span class="font-bold ${row.result === 'hit' ? 'text-green-600' : row.result === 'push' ? 'text-amber-600' : 'text-red-600'}">${row.actual}</span>
+                </div>
+                <div class="text-[10px] text-gray-400">${row.avg_value != null ? `avg: ${row.avg_value.toFixed(2)}` : ''}</div>
             </td>
             <td class="py-2.5 px-4 text-xs font-semibold text-gray-700 whitespace-nowrap">
                 ${row.odds_value ? `${row.odds_value}<div class="text-[10px] text-gray-400 font-normal uppercase">${row.odds_bookmaker}</div>` : '—'}

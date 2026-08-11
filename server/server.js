@@ -24,6 +24,7 @@ const { runOddsPipeline } = require('./odds-pipeline');
 const { startStreakWorker } = require('./streak-tracker');
 const { startStreakSyncScheduler } = require('./streak-sync-scheduler');
 const { backfillStreakResults } = require('./backfill-streak-results');
+const { fixPushResults } = require('./fix-push-results');
 
 
 const targetLeagues = [
@@ -157,7 +158,8 @@ app.listen(port, async () => {
         // runOddsPipeline(correctLeagues);
         // startStreakWorker(correctLeagues);
         startStreakSyncScheduler();
-        backfillStreakResults(30);
+        // backfillStreakResults(30);
+        fixPushResults();
 
         // require('./update-db');
     } catch (err) {
