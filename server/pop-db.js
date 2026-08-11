@@ -634,5 +634,7 @@ async function runPipelines(tasks) {
 // 5. Export the functions for use in other files
 module.exports = {
     runPipelines,
-    chunkArray
+    chunkArray,
+    generateSeasonAverages,
+    generateStandings
 };

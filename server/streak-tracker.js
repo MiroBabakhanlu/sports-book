@@ -157,4 +157,4 @@ function startStreakWorker(tasks) {
     setInterval(runAllTasks, 15 * 60 * 1000);
 }
 
-module.exports = { startStreakWorker };
+module.exports = { startStreakWorker, calculateLeagueStreaks };

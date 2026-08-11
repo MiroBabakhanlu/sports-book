@@ -16,4 +16,13 @@ router.post('/change-pin-status', adminController.changePinStatus)
 router.get('/api-token', cors(corsOptions), adminController.getApiToken)
 router.post('/api-token/regenerate', adminController.regenerateApiToken)
 
+// Admin-panel-only (unlike api-token above) - the public site never reads its
+// own error log, so no cors() needed here.
+router.get('/errors', adminController.getErrorLogs)
+
+// Admin-panel-only - historical hit/miss record of every settled streak
+// (see streak-sync-scheduler.js's captureStreakResults / StreakResult model).
+router.get('/streak-results', adminController.getStreakResults)
+router.get('/streak-results/summary', adminController.getStreakResultsSummary)
+
 module.exports = router;

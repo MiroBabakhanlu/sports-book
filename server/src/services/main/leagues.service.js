@@ -70,6 +70,9 @@ const leaguesServices = {
                 {
                     display_order: 'asc',
                 },
+                {
+                    id: 'asc',
+                },
             ],
             // FIXED: 'seasons' query is now nested directly inside 'select'. 
             // There is no top-level 'include' keyword.

@@ -22,6 +22,8 @@ const standingsRoutes = require('./src/routes/main/standings.routes');
 const { runPipelines } = require('./pop-db');
 const { runOddsPipeline } = require('./odds-pipeline');
 const { startStreakWorker } = require('./streak-tracker');
+const { startStreakSyncScheduler } = require('./streak-sync-scheduler');
+const { backfillStreakResults } = require('./backfill-streak-results');
 
 
 const targetLeagues = [
@@ -154,6 +156,8 @@ app.listen(port, async () => {
 
         // runOddsPipeline(correctLeagues);
         // startStreakWorker(correctLeagues);
+        startStreakSyncScheduler();
+        backfillStreakResults(30);
 
         // require('./update-db');
     } catch (err) {

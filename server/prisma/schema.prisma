@@ -86,6 +86,7 @@ model Team {
   teamStreaks        TeamStreak[]
   teamStandings      TeamStanding[]
   missingMatchStats  MissingMatchStat[]
+  streakResults      StreakResult[]
 
   @@map("TEAM")
 }
@@ -106,13 +107,14 @@ model Match {
   fetched_at     DateTime  @default(now())
 
   // Relations
-  season       Season             @relation(fields: [season_id], references: [id])
-  homeTeam     Team               @relation("HomeTeamMatches", fields: [home_team_id], references: [id])
-  awayTeam     Team               @relation("AwayTeamMatches", fields: [away_team_id], references: [id])
-  winnerTeam   Team?              @relation("WinnerTeamMatches", fields: [winner_team_id], references: [id])
-  stats        MatchTeamStat[]
-  matchOdds    MatchOdds[]
-  missingStats MissingMatchStat[]
+  season        Season             @relation(fields: [season_id], references: [id])
+  homeTeam      Team               @relation("HomeTeamMatches", fields: [home_team_id], references: [id])
+  awayTeam      Team               @relation("AwayTeamMatches", fields: [away_team_id], references: [id])
+  winnerTeam    Team?              @relation("WinnerTeamMatches", fields: [winner_team_id], references: [id])
+  stats         MatchTeamStat[]
+  matchOdds     MatchOdds[]
+  missingStats  MissingMatchStat[]
+  streakResults StreakResult[]
 
   @@map("MATCH")
 }
@@ -132,6 +134,7 @@ model Market {
   teamStreaks        TeamStreak[]
   matchOdds          MatchOdds[]
   missingMatchStats  MissingMatchStat[]
+  streakResults      StreakResult[]
 
   @@map("MARKET")
 }
@@ -302,4 +305,55 @@ model ApiToken {
   created_at DateTime @default(now())
 
   @@map("API_TOKEN")
+}
+
+// Every error thrown by the "main" endpoints (bookmakers/leagues/streaks/clicks/
+// matchup/standings - see server.js's mounting comment) gets one row here via
+// errorMiddleware.js, regardless of status code - a 404 on a bad streak id is
+// as worth reviewing later as a 500. No FK/relations, same standalone-log
+// pattern as ClickLog above.
+model ErrorLog {
+  id           Int      @id @default(autoincrement())
+  endpoint     String // req.originalUrl, e.g. "/api/streaks/streak_921"
+  method       String // GET, POST, ...
+  status_code  Int
+  message      String
+  stack        String?
+  query_params String? // JSON.stringify(req.query) when present, for reproducing the request
+  created_at   DateTime @default(now())
+
+  @@map("ERROR_LOG")
+}
+
+// One row per (team, market) streak that was being shown as an upcoming
+// prediction for a match that has since finished - written once, at the
+// moment streak-sync-scheduler.js detects that match finished, by reading
+// whatever TeamStreak/TeamSeasonAverage/odds state was current right then
+// (i.e. exactly what a user would have seen on the streak card before this
+// match kicked off). result is always hit/miss - never pending (this row
+// only ever gets created once the match already has a final score) or void
+// (a cancelled/abandoned match just never gets a row here, for lack of a
+// real outcome to grade against).
+model StreakResult {
+  id                Int      @id @default(autoincrement())
+  match_id          Int
+  team_id           Int
+  market_id         Int
+  streak_count      Int
+  confidence        Decimal?
+  direction         String // 'over' | 'under' - meaningless for binary markets, kept for numeric ones
+  threshold         Decimal? // null for binary markets (oddeven/both-teams-score)
+  predicted_outcome String? // binary markets only: 'odd'/'even'/'yes'/'no'
+  avg_value         Decimal? // season avg_value (rate, for binary markets) at the moment of capture
+  odds_value        Decimal?
+  odds_bookmaker    String?
+  actual_value      Decimal // the market's real value in the finished match
+  result            String // 'hit' | 'miss'
+  created_at        DateTime @default(now())
+
+  match  Match  @relation(fields: [match_id], references: [id])
+  team   Team   @relation(fields: [team_id], references: [id])
+  market Market @relation(fields: [market_id], references: [id])
+
+  @@map("STREAK_RESULT")
 }

@@ -36,6 +36,18 @@ document.getElementById('apiTokenViewBtn').addEventListener('click', () => {
     openConfigContainer('api-token-config-container');
 });
 
+document.getElementById('errorLogsViewBtn').addEventListener('click', () => {
+    openConfigContainer('error-logs-container');
+});
+
+document.getElementById('error-logs-load-more-btn').addEventListener('click', () => {
+    loadMoreErrorLogs();
+});
+
+document.getElementById('streakResultsViewBtn').addEventListener('click', () => {
+    openConfigContainer('streak-results-container');
+});
+
 document.getElementById('copy-api-token-btn').addEventListener('click', async () => {
     const input = document.getElementById('api-token-value');
     const btn = document.getElementById('copy-api-token-btn');
@@ -750,6 +762,403 @@ const renderApiToken = async () => {
     renderApiTokenUI(tokenData);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// View Errors - ErrorLog is append-only and unbounded (see errorMiddleware.js),
+// so this never fetches "everything": an initial page, a Load More button for
+// older rows (keyset-paginated on id, not OFFSET), and a 60s poll that only
+// asks for rows newer than the newest one already on screen. errorLogsState
+// is the single source of truth for what's currently rendered.
+// ─────────────────────────────────────────────────────────────────────────
+let errorLogsState = { items: [], nextCursor: null, hasMore: false, newestId: null };
+let errorLogsPollInterval = null;
+
+const getErrorLogs = async (params = {}) => {
+    try {
+        const response = await axios.get(`${API_URL}/errors`, { params });
+        return response.data?.data;
+    } catch (error) {
+        console.log(error);
+        return null;
+    }
+}
+
+const statusBadgeClass = (statusCode) => {
+    if (statusCode >= 500) return 'bg-red-50 text-red-600';
+    if (statusCode >= 400) return 'bg-amber-50 text-amber-600';
+    return 'bg-gray-100 text-gray-600';
+}
+
+const errorLogRowHtml = (row) => `
+    <details class="group">
+        <summary class="list-none px-5 py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors">
+            <span class="text-[10px] font-bold px-2 py-1 rounded ${statusBadgeClass(row.status_code)} whitespace-nowrap">${row.status_code}</span>
+            <span class="text-[10px] font-bold text-gray-400 uppercase whitespace-nowrap">${row.method}</span>
+            <span class="text-xs font-mono text-gray-700 truncate flex-1">${row.endpoint}</span>
+            <span class="text-xs text-gray-400 whitespace-nowrap">${new Date(row.created_at).toLocaleString()}</span>
+            <i class="ti ti-chevron-down text-gray-300 group-open:rotate-180 transition-transform"></i>
+        </summary>
+        <div class="px-5 pb-4 -mt-1">
+            <div class="text-xs text-gray-600 mb-2">${row.message}</div>
+            ${row.query_params ? `<div class="text-[11px] font-mono text-gray-400 mb-2">query: ${row.query_params}</div>` : ''}
+            ${row.stack ? `<pre class="text-[10px] leading-relaxed font-mono text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">${row.stack}</pre>` : ''}
+        </div>
+    </details>
+`;
+
+const renderErrorLogsList = () => {
+    const list = document.getElementById('error-logs-list');
+    const loadMoreBtn = document.getElementById('error-logs-load-more-btn');
+
+    if (errorLogsState.items.length === 0) {
+        list.innerHTML = `<div class="p-8 text-center text-sm text-gray-400 italic">No errors logged yet.</div>`;
+    } else {
+        list.innerHTML = errorLogsState.items.map(errorLogRowHtml).join('');
+    }
+
+    loadMoreBtn.classList.toggle('hidden', !errorLogsState.hasMore);
+}
+
+const loadMoreErrorLogs = async () => {
+    if (!errorLogsState.hasMore) return;
+    const loadMoreBtn = document.getElementById('error-logs-load-more-btn');
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.innerText = 'Loading...';
+
+    const result = await getErrorLogs({ cursor: errorLogsState.nextCursor, limit: 25 });
+    if (result) {
+        errorLogsState.items = [...errorLogsState.items, ...result.items];
+        errorLogsState.nextCursor = result.next_cursor;
+        errorLogsState.hasMore = result.has_more;
+        renderErrorLogsList();
+    }
+
+    loadMoreBtn.disabled = false;
+    loadMoreBtn.innerText = 'Load more';
+}
+
+// Only ever asks for rows newer than the newest one already rendered - never
+// re-fetches the whole first page, so this stays cheap no matter how big
+// ErrorLog gets or how long the admin panel's been left open on this tab.
+const pollForNewErrorLogs = async () => {
+    if (errorLogsState.newestId == null) return;
+    const result = await getErrorLogs({ after_id: errorLogsState.newestId });
+    if (result && result.items.length > 0) {
+        errorLogsState.items = [...result.items, ...errorLogsState.items];
+        errorLogsState.newestId = result.items[0].id;
+        renderErrorLogsList();
+    }
+}
+
+const stopErrorLogsPolling = () => {
+    if (errorLogsPollInterval) {
+        clearInterval(errorLogsPollInterval);
+        errorLogsPollInterval = null;
+    }
+}
+
+const renderErrorLogs = async () => {
+    stopErrorLogsPolling(); // defensive - a stray interval must never survive a re-open of this tab
+
+    document.getElementById('error-logs-list').innerHTML = `<div class="p-8 text-center text-sm text-gray-400 italic">Loading...</div>`;
+    document.getElementById('error-logs-load-more-btn').classList.add('hidden');
+
+    const result = await getErrorLogs({ limit: 25 });
+    errorLogsState = {
+        items: result?.items || [],
+        nextCursor: result?.next_cursor ?? null,
+        hasMore: result?.has_more ?? false,
+        newestId: result?.items?.[0]?.id ?? null
+    };
+    renderErrorLogsList();
+
+    errorLogsPollInterval = setInterval(pollForNewErrorLogs, 60 * 1000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Streak Results & History - every row is a settled (hit/miss) streak from
+// StreakResult (see streak-sync-scheduler.js's captureStreakResults). Filters
+// apply to the table AND the KPI/calibration/market-performance panels, so
+// one fetch (getStreakResultsSummary) drives all three, and a second
+// (getStreakResults) drives the paginated table - matching how the reference
+// mockup ties everything to the same filter bar.
+// ─────────────────────────────────────────────────────────────────────────
+const STREAK_RESULT_MARKETS = [
+    { slug: 'team-goals', label: 'Team Goals' },
+    { slug: 'total-goals', label: 'Total Goals' },
+    { slug: 'team-yellow-cards', label: 'Team Yellow Cards' },
+    { slug: 'total-yellow-cards', label: 'Total Yellow Cards' },
+    { slug: 'team-red-cards', label: 'Team Red Cards' },
+    { slug: 'total-red-cards', label: 'Total Red Cards' },
+    { slug: 'team-corner-kicks', label: 'Team Corners' },
+    { slug: 'total-corner-kicks', label: 'Total Corners' },
+    { slug: 'total-goals-1st-half', label: 'Goals 1st Half' },
+    { slug: 'total-goals-2nd-half', label: 'Goals 2nd Half' },
+    { slug: 'oddeven', label: 'Odd / Even' },
+    { slug: 'both-teams-score', label: 'BTTS' }
+];
+
+let srFilters = { outcome: 'all', from: '', to: '', league_id: '', market: '', confidence_min: '', streak_min: '', team_search: '', sort: 'date_desc', page: 1 };
+let srInitialized = false;
+
+const getStreakResults = async (params) => {
+    try {
+        const response = await axios.get(`${API_URL}/streak-results`, { params });
+        return response.data?.data;
+    } catch (error) {
+        console.log(error);
+        return null;
+    }
+}
+
+const getStreakResultsSummary = async (params) => {
+    try {
+        const response = await axios.get(`${API_URL}/streak-results/summary`, { params });
+        return response.data?.data;
+    } catch (error) {
+        console.log(error);
+        return null;
+    }
+}
+
+function srBuildParams() {
+    const p = {};
+    if (srFilters.outcome !== 'all') p.outcome = srFilters.outcome;
+    if (srFilters.from) p.from = srFilters.from;
+    if (srFilters.to) p.to = srFilters.to;
+    if (srFilters.league_id) p.league_id = srFilters.league_id;
+    if (srFilters.market) p.market = srFilters.market;
+    if (srFilters.confidence_min) p.confidence_min = srFilters.confidence_min;
+    if (srFilters.streak_min) p.streak_min = srFilters.streak_min;
+    if (srFilters.team_search) p.team_search = srFilters.team_search;
+    return p;
+}
+
+function srRenderOutcomeSeg() {
+    const seg = document.getElementById('sr-outcome-seg');
+    const options = [['all', 'All'], ['hit', 'Hit'], ['miss', 'Miss']];
+    seg.innerHTML = options.map(([value, label]) => {
+        const on = srFilters.outcome === value;
+        const colorClass = on
+            ? (value === 'hit' ? 'bg-green-600 text-white' : value === 'miss' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white')
+            : 'bg-white text-gray-600 hover:bg-gray-50';
+        return `<span data-outcome="${value}" class="px-3 py-1.5 cursor-pointer border-r border-gray-200 last:border-r-0 ${colorClass}">${label}</span>`;
+    }).join('');
+    seg.querySelectorAll('[data-outcome]').forEach(el => {
+        el.addEventListener('click', () => {
+            srFilters.outcome = el.dataset.outcome;
+            srRenderOutcomeSeg();
+        });
+    });
+}
+
+function srPopulateDropdowns() {
+    const leagueSel = document.getElementById('sr-league');
+    if (leagueSel.options.length <= 1) {
+        leaguesCache.forEach(l => {
+            const opt = document.createElement('option');
+            opt.value = l.id;
+            opt.textContent = `${l.country ? l.country + ': ' : ''}${l.name}`;
+            leagueSel.appendChild(opt);
+        });
+    }
+
+    const marketSel = document.getElementById('sr-market');
+    if (marketSel.options.length <= 1) {
+        STREAK_RESULT_MARKETS.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.slug;
+            opt.textContent = m.label;
+            marketSel.appendChild(opt);
+        });
+    }
+}
+
+function srKpiCard(label, value, valueClass, sub) {
+    return `
+        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${label}</div>
+            <div class="text-2xl font-extrabold mt-1 ${valueClass || 'text-gray-900'}">${value}</div>
+            ${sub ? `<div class="text-[11px] text-gray-400 mt-1">${sub}</div>` : ''}
+        </div>
+    `;
+}
+
+function srRenderSummary(summary) {
+    const kpis = document.getElementById('sr-kpis');
+    if (!summary) {
+        kpis.innerHTML = '';
+        return;
+    }
+    kpis.innerHTML = [
+        srKpiCard('Settled streaks', summary.settled_count, 'text-teal-600'),
+        srKpiCard('Overall hit rate', `${summary.hit_rate}%`, summary.hit_rate >= 50 ? 'text-green-600' : 'text-red-600'),
+        srKpiCard('Calibration gap', `${summary.calibration_gap > 0 ? '+' : ''}${summary.calibration_gap}pts`, 'text-amber-600', `predicted ${summary.predicted_confidence}% &middot; actual ${summary.hit_rate}%`),
+        srKpiCard('Longest held streak', summary.longest_streak ? summary.longest_streak.streak_count : '—', 'text-teal-600', summary.longest_streak ? `${summary.longest_streak.team} &middot; ${summary.longest_streak.market}` : '')
+    ].join('');
+
+    const cal = document.getElementById('sr-calibration');
+    cal.innerHTML = summary.calibration.map(band => {
+        if (band.count === 0) {
+            return `<div class="flex items-center gap-3 text-xs text-gray-300 italic">${band.label} &mdash; no settled streaks</div>`;
+        }
+        const gap = band.actual - band.predicted;
+        const gapColor = Math.abs(gap) <= 3 ? 'text-green-600' : 'text-red-600';
+        return `
+            <div class="grid grid-cols-[70px_1fr_90px] items-center gap-3">
+                <div class="text-xs font-semibold text-gray-700">${band.label}<div class="text-[10px] text-gray-400 font-normal">${band.count} streaks</div></div>
+                <div class="h-5 bg-gray-100 rounded relative overflow-hidden">
+                    <div class="h-full bg-teal-500" style="width:${band.actual}%"></div>
+                </div>
+                <div class="text-right text-xs">
+                    <b class="${gapColor}">${band.actual}%</b>
+                    <div class="text-[10px] text-gray-400">target ${band.predicted}%</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    const mp = document.getElementById('sr-market-perf');
+    if (summary.market_performance.length === 0) {
+        mp.innerHTML = `<div class="p-6 text-center text-xs text-gray-400 italic">No settled streaks yet.</div>`;
+    } else {
+        mp.innerHTML = summary.market_performance.map(m => {
+            const barColor = m.hit_rate >= 70 ? 'bg-teal-500' : m.hit_rate >= 55 ? 'bg-amber-500' : 'bg-red-500';
+            return `
+                <div class="grid grid-cols-[1fr_44px_74px_52px] items-center gap-2 px-4 py-2 border-b border-gray-100 last:border-b-0 text-xs">
+                    <span class="font-semibold text-gray-800">${m.market}</span>
+                    <span class="text-gray-400 text-right">${m.count}</span>
+                    <span class="h-1.5 bg-gray-200 rounded-full overflow-hidden"><span class="block h-full ${barColor}" style="width:${m.hit_rate}%"></span></span>
+                    <span class="font-bold text-right">${m.hit_rate}%</span>
+                </div>
+            `;
+        }).join('');
+    }
+}
+
+function srResultBadge(result) {
+    return result === 'hit'
+        ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-green-50 border border-green-200 text-green-700">HIT</span>`
+        : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 border border-red-200 text-red-600">MISS</span>`;
+}
+
+function srRenderTable(result) {
+    const tbody = document.getElementById('sr-table-body');
+    const info = document.getElementById('sr-table-info');
+    const pagination = document.getElementById('sr-pagination');
+
+    if (!result || result.items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-sm text-gray-400 italic">No settled streaks match the selected filters.</td></tr>`;
+        info.textContent = '';
+        pagination.innerHTML = '';
+        return;
+    }
+
+    tbody.innerHTML = result.items.map(row => `
+        <tr class="border-b border-gray-100 last:border-b-0 ${row.result === 'miss' ? 'bg-red-50/30' : ''} hover:bg-gray-50">
+            <td class="py-2.5 px-4 text-xs text-gray-500 whitespace-nowrap">
+                <b class="block text-gray-700">${new Date(row.match.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}</b>
+                ${new Date(row.match.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+            </td>
+            <td class="py-2.5 px-4 whitespace-nowrap">
+                <div class="text-xs font-semibold text-gray-800">${row.match.home.name} vs ${row.match.away.name}</div>
+                <div class="text-[10px] text-gray-400">${row.match.league} &middot; MD${row.match.matchday ?? '—'}</div>
+            </td>
+            <td class="py-2.5 px-4 text-xs">
+                <b class="block text-gray-800">${row.market}</b>
+                <span class="text-gray-400">${row.prediction}</span>
+            </td>
+            <td class="py-2.5 px-4 text-center font-extrabold text-teal-600">${row.streak_count}</td>
+            <td class="py-2.5 px-4 text-xs font-bold text-gray-700">${row.confidence != null ? row.confidence.toFixed(1) + '%' : '—'}</td>
+            <td class="py-2.5 px-4 text-xs whitespace-nowrap">
+                <span class="text-gray-400">${row.prediction}</span> &rarr;
+                <span class="font-bold ${row.result === 'hit' ? 'text-green-600' : 'text-red-600'}">${row.actual}</span>
+            </td>
+            <td class="py-2.5 px-4 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                ${row.odds_value ? `${row.odds_value}<div class="text-[10px] text-gray-400 font-normal uppercase">${row.odds_bookmaker}</div>` : '—'}
+            </td>
+            <td class="py-2.5 px-4">${srResultBadge(row.result)}</td>
+        </tr>
+    `).join('');
+
+    const { page, per_page, total, total_pages } = result.meta;
+    info.textContent = `Showing ${(page - 1) * per_page + 1}–${Math.min(page * per_page, total)} of ${total} settled streaks`;
+
+    const pages = [];
+    for (let i = 1; i <= total_pages; i++) {
+        if (i === 1 || i === total_pages || Math.abs(i - page) <= 1) pages.push(i);
+        else if (pages[pages.length - 1] !== '…') pages.push('…');
+    }
+    pagination.innerHTML = pages.map(p => p === '…'
+        ? `<span class="w-7 h-7 flex items-center justify-center text-xs text-gray-400">…</span>`
+        : `<span data-page="${p}" class="w-7 h-7 flex items-center justify-center rounded text-xs cursor-pointer ${p === page ? 'bg-gray-900 text-white font-bold' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}">${p}</span>`
+    ).join('');
+    pagination.querySelectorAll('[data-page]').forEach(el => {
+        el.addEventListener('click', () => {
+            srFilters.page = Number(el.dataset.page);
+            srLoadTable();
+        });
+    });
+}
+
+async function srLoadTable() {
+    document.getElementById('sr-table-body').innerHTML = `<tr><td colspan="8" class="p-8 text-center text-sm text-gray-400 italic">Loading...</td></tr>`;
+    const result = await getStreakResults({ ...srBuildParams(), sort: srFilters.sort, page: srFilters.page, per_page: 10 });
+    srRenderTable(result);
+}
+
+async function srLoadSummary() {
+    const summary = await getStreakResultsSummary(srBuildParams());
+    srRenderSummary(summary);
+}
+
+function srApplyFilters() {
+    srFilters.from = document.getElementById('sr-from').value;
+    srFilters.to = document.getElementById('sr-to').value;
+    srFilters.league_id = document.getElementById('sr-league').value;
+    srFilters.market = document.getElementById('sr-market').value;
+    srFilters.confidence_min = document.getElementById('sr-confidence').value;
+    srFilters.streak_min = document.getElementById('sr-streak').value;
+    srFilters.team_search = document.getElementById('sr-team-search').value;
+    srFilters.page = 1;
+    srLoadTable();
+    srLoadSummary();
+}
+
+function srResetFilters() {
+    srFilters = { outcome: 'all', from: '', to: '', league_id: '', market: '', confidence_min: '', streak_min: '', team_search: '', sort: 'date_desc', page: 1 };
+    document.getElementById('sr-from').value = '';
+    document.getElementById('sr-to').value = '';
+    document.getElementById('sr-league').value = '';
+    document.getElementById('sr-market').value = '';
+    document.getElementById('sr-confidence').value = '';
+    document.getElementById('sr-streak').value = '';
+    document.getElementById('sr-team-search').value = '';
+    srRenderOutcomeSeg();
+    srLoadTable();
+    srLoadSummary();
+}
+
+function initStreakResults() {
+    if (!srInitialized) {
+        srInitialized = true;
+        srRenderOutcomeSeg();
+        document.getElementById('sr-apply-btn').addEventListener('click', srApplyFilters);
+        document.getElementById('sr-reset-btn').addEventListener('click', srResetFilters);
+        document.querySelectorAll('#streak-results-container th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.dataset.sort;
+                const dir = srFilters.sort === `${key}_desc` ? 'asc' : 'desc';
+                srFilters.sort = `${key}_${dir}`;
+                srFilters.page = 1;
+                srLoadTable();
+            });
+        });
+    }
+    srPopulateDropdowns();
+    srLoadTable();
+    srLoadSummary();
+}
+
 const renderBookmakers = async () => {
     const response = await getAllBookmakers();
     console.log(response)
@@ -1044,14 +1453,25 @@ const openConfigContainer = (containerId) => {
     const bookmakerConfig = document.getElementById('bookmaker-config-container');
     const recordsView = document.getElementById('records-container');
     const apiTokenConfig = document.getElementById('api-token-config-container');
+    const errorLogsConfig = document.getElementById('error-logs-container');
+    const streakResultsConfig = document.getElementById('streak-results-container');
     const leagueBtn = document.getElementById('leagueViewBtn');
     const bookmakerBtn = document.getElementById('bookmakerViewBtn');
     const recordsBtn = document.getElementById('recordsViewBtn');
     const apiTokenBtn = document.getElementById('apiTokenViewBtn');
+    const errorLogsBtn = document.getElementById('errorLogsViewBtn');
+    const streakResultsBtn = document.getElementById('streakResultsViewBtn');
+
+    // A stray 60s poll must never keep running once this tab isn't visible
+    // anymore - stop it unconditionally here, then only the branch below
+    // that actually opens error-logs-container restarts it.
+    stopErrorLogsPolling();
 
     leagueConfig.classList.add('hidden');
     bookmakerConfig.classList.add('hidden');
     apiTokenConfig.classList.add('hidden');
+    errorLogsConfig.classList.add('hidden');
+    streakResultsConfig.classList.add('hidden');
     document.getElementById('leaguesContainer').style.display = 'none'
     document.getElementById('openAllMArketsBtn').style.display = 'none'
     document.getElementById('records-container').style.display = 'none'
@@ -1060,6 +1480,8 @@ const openConfigContainer = (containerId) => {
     bookmakerBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
     recordsViewBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
     apiTokenBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
+    errorLogsBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
+    streakResultsBtn.className = "px-6 py-2.5 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors";
 
 
     if (containerId === 'league-config-container') {
@@ -1088,6 +1510,18 @@ const openConfigContainer = (containerId) => {
         apiTokenConfig.classList.remove('hidden');
         apiTokenBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
         renderApiToken();
+    }
+
+    if (containerId === 'error-logs-container') {
+        errorLogsConfig.classList.remove('hidden');
+        errorLogsBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
+        renderErrorLogs();
+    }
+
+    if (containerId === 'streak-results-container') {
+        streakResultsConfig.classList.remove('hidden');
+        streakResultsBtn.className = "px-6 py-2.5 text-sm font-semibold bg-teal-50 text-teal-700 border-r-4 border-teal-600 cursor-pointer";
+        initStreakResults();
     }
 }
 

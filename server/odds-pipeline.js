@@ -175,4 +175,4 @@ function runOddsPipeline(targetLeagues) {
     setInterval(() => { syncTargetedOdds(targetLeagues); }, THREE_HOURS);
 }
 
-module.exports = { runOddsPipeline };
+module.exports = { runOddsPipeline, syncTargetedOdds };

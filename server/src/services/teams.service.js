@@ -41,10 +41,17 @@ const STREAK_CHECK_SLUGS = [
 
 const teamsServices = {
     getLeagues: async () => {
+        // is_pinned first: pinned and unpinned leagues each have their own
+        // independent 0-based display_order sequence, so sorting by
+        // display_order alone (as this used to) ties a pinned league against
+        // an unpinned one sharing the same number, and SQL resolves ties with
+        // no defined order - id as a final tiebreaker keeps it fully deterministic.
         return await prisma.league.findMany({
-            orderBy: {
-                display_order: 'asc'
-            }
+            orderBy: [
+                { is_pinned: 'desc' },
+                { display_order: 'asc' },
+                { id: 'asc' }
+            ]
         });
     },
 

@@ -7,10 +7,15 @@ const { getUpcomingMatches } = require("./teams.service");
 const adminService = {
 
     getALlLeagues: async () => {
+        // id as a final tiebreaker: any two leagues that ever end up sharing the
+        // same display_order (a fresh league still on its default of 999, or a
+        // display_order tie from before the changePinStatus race fix) would
+        // otherwise sort in a DB-arbitrary order that can flip between reloads.
         let allLeagues = await prisma.league.findMany({
             orderBy: [
                 { is_pinned: 'desc' },
-                { display_order: 'asc' }
+                { display_order: 'asc' },
+                { id: 'asc' }
             ]
         }) ?? [];
 
@@ -79,20 +84,27 @@ const adminService = {
 
         const nextPinned = !leagueData.is_pinned;
 
-        // Place the league at the end of whichever group it's entering,
-        // so the manual toggle behaves the same as dropping it at the end of that zone.
-        const lastInGroup = await prisma.league.findFirst({
-            where: { is_pinned: nextPinned },
-            orderBy: { display_order: 'desc' },
-            select: { display_order: true }
-        });
+        // Place the league at the end of whichever group it's entering, so the
+        // manual toggle behaves the same as dropping it at the end of that zone.
+        // Read-then-write, so it has to happen inside one transaction - otherwise
+        // two near-simultaneous toggles into the same zone (two tabs, a double
+        // click) can both read the same "current max" before either writes,
+        // landing both leagues on the same display_order and leaving their
+        // relative order arbitrary from then on.
+        const updatedLeague = await prisma.$transaction(async (tx) => {
+            const lastInGroup = await tx.league.findFirst({
+                where: { is_pinned: nextPinned },
+                orderBy: { display_order: 'desc' },
+                select: { display_order: true }
+            });
 
-        const updatedLeague = await prisma.league.update({
-            where: { id: Number(leagueId) },
-            data: {
-                is_pinned: nextPinned,
-                display_order: (lastInGroup?.display_order ?? -1) + 1
-            }
+            return tx.league.update({
+                where: { id: Number(leagueId) },
+                data: {
+                    is_pinned: nextPinned,
+                    display_order: (lastInGroup?.display_order ?? -1) + 1
+                }
+            });
         });
 
         return updatedLeague;
@@ -126,6 +138,38 @@ const adminService = {
         ]);
 
         return created;
+    },
+
+    // ErrorLog grows without bound (see errorMiddleware.js), so this is always
+    // keyset pagination on `id` - never OFFSET/skip-by-count, which gets slower
+    // the deeper the admin panel scrolls as the table grows. Two modes:
+    //   - afterId: "what's new since I last checked" (the 1-min poll) - every
+    //     row newer than a known id, capped so a genuine error storm can't
+    //     return an unbounded response.
+    //   - cursor: "give me the next page going backward" (the Load More
+    //     button) - everything older than a known id, page-sized.
+    getErrorLogs: async ({ cursor, afterId, limit = 25 } = {}) => {
+        if (afterId) {
+            const items = await prisma.errorLog.findMany({
+                where: { id: { gt: Number(afterId) } },
+                orderBy: { id: 'desc' },
+                take: 50
+            });
+            return { items, next_cursor: null, has_more: false };
+        }
+
+        const take = Math.min(Number(limit) || 25, 100);
+        const rows = await prisma.errorLog.findMany({
+            take: take + 1, // one extra row just to know if there's a next page, not returned
+            ...(cursor ? { skip: 1, cursor: { id: Number(cursor) } } : {}),
+            orderBy: { id: 'desc' }
+        });
+
+        const hasMore = rows.length > take;
+        const items = hasMore ? rows.slice(0, take) : rows;
+        const nextCursor = hasMore ? items[items.length - 1].id : null;
+
+        return { items, next_cursor: nextCursor, has_more: hasMore };
     }
 
 }

@@ -1,4 +1,5 @@
 const adminService = require("../services/admin.service");
+const streakResultsService = require("../services/streak-results.service");
 
 const adminController = {
 
@@ -61,6 +62,43 @@ const adminController = {
     regenerateApiToken: async (req, res, next) => {
         try {
             const result = await adminService.regenerateApiToken();
+            return res.status(200).json({
+                success: true,
+                data: result
+            })
+        } catch (error) {
+            next(error)
+        }
+    },
+    getErrorLogs: async (req, res, next) => {
+        try {
+            const result = await adminService.getErrorLogs({
+                cursor: req.query.cursor,
+                afterId: req.query.after_id,
+                limit: req.query.limit
+            });
+            return res.status(200).json({
+                success: true,
+                data: result
+            })
+        } catch (error) {
+            next(error)
+        }
+    },
+    getStreakResults: async (req, res, next) => {
+        try {
+            const result = await streakResultsService.getStreakResults(req.query);
+            return res.status(200).json({
+                success: true,
+                data: result
+            })
+        } catch (error) {
+            next(error)
+        }
+    },
+    getStreakResultsSummary: async (req, res, next) => {
+        try {
+            const result = await streakResultsService.getStreakResultsSummary(req.query);
             return res.status(200).json({
                 success: true,
                 data: result
