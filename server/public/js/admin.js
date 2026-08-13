@@ -1058,7 +1058,7 @@ function srRenderTable(result) {
     const pagination = document.getElementById('sr-pagination');
 
     if (!result || result.items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-sm text-gray-400 italic">No settled streaks match the selected filters.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="p-8 text-center text-sm text-gray-400 italic">No settled streaks match the selected filters.</td></tr>`;
         info.textContent = '';
         pagination.innerHTML = '';
         return;
@@ -1081,12 +1081,10 @@ function srRenderTable(result) {
             <td class="py-2.5 px-4 text-center font-extrabold text-teal-600">${row.streak_count}</td>
             <td class="py-2.5 px-4 text-xs font-bold text-gray-700">${row.confidence != null ? row.confidence.toFixed(1) + '%' : '—'}</td>
             <td class="py-2.5 px-4 text-xs whitespace-nowrap">
-                <div>
-                    <span class="text-gray-400">${row.prediction}</span> &rarr;
-                    <span class="font-bold ${row.result === 'hit' ? 'text-green-600' : row.result === 'push' ? 'text-amber-600' : 'text-red-600'}">${row.actual}</span>
-                </div>
-                <div class="text-[10px] text-gray-400">${row.avg_value != null ? `avg: ${row.avg_value.toFixed(2)}` : ''}</div>
+                <span class="text-gray-400">${row.prediction}</span> &rarr;
+                <span class="font-bold ${row.result === 'hit' ? 'text-green-600' : row.result === 'push' ? 'text-amber-600' : 'text-red-600'}">${row.actual}</span>
             </td>
+            <td class="py-2.5 px-4 text-center text-xs font-semibold text-gray-700">${row.avg_value != null ? row.avg_value.toFixed(2) : '—'}</td>
             <td class="py-2.5 px-4 text-xs font-semibold text-gray-700 whitespace-nowrap">
                 ${row.odds_value ? `${row.odds_value}<div class="text-[10px] text-gray-400 font-normal uppercase">${row.odds_bookmaker}</div>` : '—'}
             </td>
@@ -1115,7 +1113,7 @@ function srRenderTable(result) {
 }
 
 async function srLoadTable() {
-    document.getElementById('sr-table-body').innerHTML = `<tr><td colspan="8" class="p-8 text-center text-sm text-gray-400 italic">Loading...</td></tr>`;
+    document.getElementById('sr-table-body').innerHTML = `<tr><td colspan="9" class="p-8 text-center text-sm text-gray-400 italic">Loading...</td></tr>`;
     const result = await getStreakResults({ ...srBuildParams(), sort: srFilters.sort, page: srFilters.page, per_page: 10 });
     srRenderTable(result);
 }
