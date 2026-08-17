@@ -1,67 +1,89 @@
 // ─────────────────────────────────────────────────────────────────────────
-// One self-contained script whose job is keeping the database in sync with
-// the live API - for every game, not just ones with an active streak - and,
-// once a game finishes, detecting which teams' streaks are now new/continued/
-// broken and recording those to a JSON file (later: sent to another server;
-// for now, written locally so the data to be sent can be inspected).
-// Toggled from server.js like every other pipeline (commented out by
-// default). Fully self-contained - does not import from or coordinate with
-// any other watcher/pipeline script.
+// One self-contained script, one unified flow, one interval
+// (UNIFIED_INTERVAL_MS, 15 minutes). No per-match timers - every tracked
+// league/season gets bulk-checked every tick instead. Toggled from
+// server.js like every other pipeline (commented out by default).
 //
-// Flow (every SCAN_INTERVAL_MS):
-//   1. Resync stale matches first - any match still "NS" whose kickoff
-//      already passed unnoticed (server was off, missed a restart, etc)
-//      gets caught up immediately, before anything else runs, so a gap in
-//      uptime never permanently loses a match's data.
-//   2. Re-check any postponed (PST) match directly against the API - if it
-//      now has a real NS date, update the DB so it's picked up by step 3
-//      below in the same pass.
-//   3. Find every match kicking off in the next 24h and, for any that
-//      doesn't already have one, schedule 5 checks after its kickoff time
-//      (SCHEDULE_OFFSETS_MIN: 0/25/50/75/115 min) - covering kickoff, two
-//      mid-match points, the regular full-time mark, and a final safety
-//      check well past 90+stoppage to catch extra time/penalties too.
-//   4. Each check asks the live API about that one fixture:
-//        - Finished -> run the full sync (match result, every market's
-//          stats, season averages/standings, league streaks, odds), then
-//          diff that team's streak state before/after to detect new/
-//          continued/broken markets and upsert them into the JSON file.
-//        - Still live/in-progress -> just update status + the live score,
-//          nothing heavier (averages/streaks only make sense once final).
+// Every tick:
+//   0. Reconstruct any StreakResult rows that should exist for finished
+//      matches in the last RESULT_BACKFILL_LOOKBACK_DAYS but don't (reuses
+//      backfill-streak-results.js as-is) - covers a match whose status is
+//      already correctly FT but whose grading step happened to fail
+//      earlier (that step is deliberately try/caught so a grading failure
+//      never blocks the rest of a match's processing).
+//   1. For every league/season with at least one non-finished match, bulk-
+//      fetch its fixture list spanning FIXTURE_LOOKBACK_DAYS back through
+//      FIXTURE_WINDOW_DAYS ahead, in ONE API call per league (not one call
+//      per match) - covers postponed status, kickoff-time drift, and live
+//      status/score, all from the same response, for every match in that
+//      window at once. The backward half means a match still stuck in a
+//      non-final status from before now (server downtime, a missed check)
+//      gets rediscovered the same way an upcoming one does.
+//   2. Any fixture whose status just became postponed (or un-postponed), or
+//      whose kickoff time moved, gets a StreakChangeEvent logged for every
+//      active (>=3) streak belonging to either team in that match.
+//   3. Any fixture that just turned FT/AET/PEN gets a second, detail-level
+//      bulk fetch (batched by id, since the list call above doesn't include
+//      per-match statistics) and is queued for the same finish-processing
+//      this script has always done - final score, every market's stats,
+//      season averages/standings, league streak recalculation, StreakResult
+//      grading, and a new/continued/broken StreakChangeEvent row for every
+//      affected streak. Matches finishing in the same tick are batched
+//      together so the per-league/season recalculation runs once, not once
+//      per match.
+//   4. Odds get refreshed for every tracked league/season (via the
+//      now-optimized odds-pipeline.js).
+//   5. Every currently active (>=3) streak whose next match falls within
+//      DETECTION_WINDOW_DAYS gets its current best odd compared against
+//      what it was last tick (held in memory - see previousBestOdds below);
+//      any difference logs an 'odds_changed' StreakChangeEvent.
+//
+// All detected changes land in the StreakChangeEvent table (see
+// prisma/schema.prisma) - the external server polls
+// GET /api/streaks/changes for unsent rows and acks them via
+// POST /api/streaks/changes/ack, per that route's own comments.
 // ─────────────────────────────────────────────────────────────────────────
 
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
 const { prisma, connectDB } = require('./src/utils/prisma');
 const { generateSeasonAverages, generateStandings } = require('./pop-db');
 const { calculateLeagueStreaks } = require('./streak-tracker');
 const { syncTargetedOdds } = require('./odds-pipeline');
+const { backfillStreakResults } = require('./backfill-streak-results');
 const { SLUG_MAP } = require('./src/services/teams.service');
 
 const API_KEY = '6dea7d814258faa2db4f3051b6cfc065';
 const BASE_URL = 'https://v3.football.api-sports.io';
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 
-// Covers kickoff, two mid-match points, the regular full-time mark, and a
-// final +115min safety check for matches still going (extra time, penalties,
-// a delayed kickoff) at the 75min mark.
-const SCHEDULE_OFFSETS_MIN = [0, 25, 50, 75, 115];
-const SCAN_INTERVAL_MS = 10 * 60 * 1000;
-const LOOKAHEAD_MS = 24 * 60 * 60 * 1000;
+const UNIFIED_INTERVAL_MS = 15 * 60 * 1000;
+const FIXTURE_WINDOW_DAYS = 30;
+const DETECTION_WINDOW_DAYS = 30;
 
-// How far back to look for "stale" NS matches - ones whose kickoff already
-// passed without ever being checked (server was off, a restart happened
-// mid-window, etc). Bounded so a tick doesn't go hammering the API for
-// genuinely ancient/broken rows - a week comfortably covers "forgot to keep
-// the server on over the weekend."
-const STALE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+// How far back the fixture fetch also looks, alongside the forward window -
+// catches anything still stuck in a non-final status (NS/PST/live) from
+// before now (server downtime, a missed check, etc). Matches don't need
+// their own scheduled check to be rediscovered anymore; they just have to
+// fall inside this range on the next tick.
+const FIXTURE_LOOKBACK_DAYS = 7;
 
-const OUTPUT_FILE = path.join(__dirname, 'data', 'tracked-streaks.json');
+// Companion to the lookback above but for a different failure mode: a match
+// whose status already correctly says FT (so the fetch above won't touch it
+// again) but whose StreakResult grading never completed - captureStreakResults
+// is deliberately try/caught so a grading failure never blocks the rest of a
+// match's processing, which means it's possible to end up with a fully
+// correct match/stats/averages and zero graded StreakResult rows. Reuses
+// backfill-streak-results.js as-is (point-in-time reconstruction, skips
+// combos that already exist) rather than duplicating that logic here.
+const RESULT_BACKFILL_LOOKBACK_DAYS = 7;
 
-// matchId -> true once its checks are scheduled, so a re-scan within the
-// same 24h window never double-schedules the same match. In-memory only.
-const scheduledMatchIds = new Set();
+function chunkArray(array, size) {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += size) {
+        chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared lookup tables (same derivations streaks.service.js / render_stats.js /
@@ -102,44 +124,30 @@ const STREAK_ELIGIBLE_MARKET_SLUGS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
-// JSON output helpers
+// StreakChangeEvent logging helpers
 // ─────────────────────────────────────────────────────────────────────────
-function readTrackedStreaks() {
-    try {
-        return JSON.parse(fs.readFileSync(OUTPUT_FILE, 'utf8'));
-    } catch {
-        return {};
-    }
-}
-
-// Read-modify-write, synchronous - calls here are spaced by match events,
-// never a request hot path, so blocking briefly avoids a torn file from
-// overlapping writes.
-function upsertTrackedStreaks(entries) {
-    if (entries.length === 0) return;
-    fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
-    const current = readTrackedStreaks();
-    for (const entry of entries) {
-        current[`streak_${entry.streak_id}`] = entry;
-    }
-    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(current, null, 2));
-    console.log(`[streak-sync-scheduler] Wrote ${entries.length} streak change(s) to ${OUTPUT_FILE}.`);
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// API helpers
-// ─────────────────────────────────────────────────────────────────────────
-async function fetchSingleFixture(idApi) {
-    const response = await axios.get(`${BASE_URL}/fixtures`, {
-        headers: { 'x-apisports-key': API_KEY },
-        params: { id: idApi }
+async function logChangeEvent(teamStreakId, changeType, description) {
+    await prisma.streakChangeEvent.create({
+        data: { team_streak_id: teamStreakId, change_type: changeType, description }
     });
-    return response.data.response?.[0] ?? null;
+}
+
+// Used for match-level changes (postponed, kickoff time) - logs one event
+// per currently-active (>=3) streak belonging to either team in the match,
+// since those are exactly the streaks a user would currently be shown a
+// prediction for involving this match.
+async function logChangeEventsForMatchStreaks(homeTeamId, awayTeamId, seasonId, changeType, description) {
+    const streaks = await prisma.teamStreak.findMany({
+        where: { season_id: seasonId, team_id: { in: [homeTeamId, awayTeamId] }, streak_length: { gte: 3 } }
+    });
+    if (streaks.length === 0) return;
+    await prisma.streakChangeEvent.createMany({
+        data: streaks.map(s => ({ team_streak_id: s.id, change_type: changeType, description }))
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Match/stat sync (same logic that used to live in match-status-watcher.js -
-// folded in here directly since this script no longer depends on that file)
+// Match/stat sync
 // ─────────────────────────────────────────────────────────────────────────
 async function upsertMatchStat(tx, matchId, teamId, marketId, value, side) {
     await tx.matchTeamStat.upsert({
@@ -331,7 +339,7 @@ async function updateMatchAndStats(apiFixture, dbMatch, homeTeam, awayTeam) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Streak snapshot / diff / JSON record building
+// Streak snapshot / current-data resolution
 // ─────────────────────────────────────────────────────────────────────────
 async function snapshotTeamStreaks(teamIds, seasonId) {
     const rows = await prisma.teamStreak.findMany({
@@ -345,6 +353,31 @@ async function snapshotTeamStreaks(teamIds, seasonId) {
     return map;
 }
 
+// Best (highest) odd across every bookmaker offering this exact streak's
+// recommended selection for its next match - shared by buildActiveStreakRecord
+// (resolving current data for the external API) and detectOddsChanges below
+// (comparing this same value tick-over-tick), so the two can never disagree
+// about what "the odds for this streak" means.
+async function getBestOddForStreak(teamId, marketSlug, direction, threshold, binary, suggestedOutcome, nextMatch) {
+    if (!nextMatch) return null;
+    const isHome = nextMatch.home_team_id === teamId;
+    const rawSlug = CANONICAL_TO_RAW[marketSlug]?.[isHome ? 'home' : 'away'];
+    if (!rawSlug) return null;
+
+    const rawMarket = await prisma.market.findUnique({ where: { slug: rawSlug } });
+    if (!rawMarket) return null;
+
+    const matchOdds = await prisma.matchOdds.findMany({ where: { match_id: nextMatch.id }, include: { bookmaker: true } });
+    const selectionSlug = binary ? suggestedOutcome : `${direction}-${threshold}`;
+    const matches = matchOdds.filter(o => o.market_id === rawMarket.id && o.slug === selectionSlug);
+    matches.sort((a, b) => Number(b.odd) - Number(a.odd));
+    if (!matches[0]) return null;
+    return { value: Number(matches[0].odd), bookmaker: matches[0].bookmaker?.name ?? null };
+}
+
+// Resolves one TeamStreak to everything the external server needs to render
+// it - used both when building a new/continued record after a finish, and
+// when resolving a StreakChangeEvent to current data for GET /changes.
 async function buildActiveStreakRecord(teamStreakId, team, marketSlug, marketName, status) {
     const teamStreak = await prisma.teamStreak.findUnique({ where: { id: teamStreakId } });
     if (!teamStreak) return null;
@@ -368,21 +401,7 @@ async function buildActiveStreakRecord(teamStreakId, team, marketSlug, marketNam
     const binary = BINARY_MARKET_OUTCOMES[marketSlug];
     const suggestedOutcome = binary ? (teamStreak.streak_direction === 'below' ? binary.positive : binary.negative) : null;
 
-    let recommendedOdd = null;
-    if (nextMatch) {
-        const isHome = nextMatch.home_team_id === team.id;
-        const rawSlug = CANONICAL_TO_RAW[marketSlug]?.[isHome ? 'home' : 'away'];
-        if (rawSlug) {
-            const rawMarket = await prisma.market.findUnique({ where: { slug: rawSlug } });
-            if (rawMarket) {
-                const matchOdds = await prisma.matchOdds.findMany({ where: { match_id: nextMatch.id }, include: { bookmaker: true } });
-                const selectionSlug = binary ? suggestedOutcome : `${direction}-${threshold}`;
-                const matches = matchOdds.filter(o => o.market_id === rawMarket.id && o.slug === selectionSlug);
-                matches.sort((a, b) => Number(b.odd) - Number(a.odd));
-                if (matches[0]) recommendedOdd = { value: Number(matches[0].odd), bookmaker: matches[0].bookmaker?.name ?? null };
-            }
-        }
-    }
+    const recommendedOdd = await getBestOddForStreak(team.id, marketSlug, direction, threshold, binary, suggestedOutcome, nextMatch);
 
     return {
         streak_id: teamStreak.id,
@@ -418,15 +437,30 @@ function buildBrokenStreakRecord(teamStreakId, team, marketName, newStreakLength
     };
 }
 
+// Single entry point the external-facing API uses to resolve any
+// team_streak_id to its current display data, regardless of what kind of
+// change was originally logged for it.
+async function resolveCurrentStreakData(teamStreakId) {
+    const teamStreak = await prisma.teamStreak.findUnique({
+        where: { id: teamStreakId },
+        include: { team: true, market: true }
+    });
+    if (!teamStreak) return null;
+
+    if (teamStreak.streak_length < 3) {
+        return buildBrokenStreakRecord(teamStreak.id, teamStreak.team, teamStreak.market.name, teamStreak.streak_length);
+    }
+    return buildActiveStreakRecord(teamStreak.id, teamStreak.team, teamStreak.market.slug, teamStreak.market.name, 'continued');
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // The full sync for one or more confirmed-finished matches: match+stats,
-// averages/standings, league streaks, odds - then diff each match's streak
-// state before/after to find new/continued/broken markets and write them to
-// the JSON file. Takes a BATCH so that when several matches share a league
-// and season (a full matchday, or catching up a backlog after downtime),
+// averages/standings, league streaks - then diff each match's streak state
+// before/after to find new/continued/broken markets and log a
+// StreakChangeEvent for each. Takes a BATCH so that when several matches
+// share a league and season (a full matchday, or catching up a backlog),
 // the expensive per-league/season steps - averages, standings, streak
-// recalculation, and especially the odds sync (a multi-page API call per
-// league) - run ONCE for the whole batch instead of once per match.
+// recalculation - run ONCE for the whole batch instead of once per match.
 // ─────────────────────────────────────────────────────────────────────────
 async function processFinishedFixturesBatch(items) {
     if (items.length === 0) return;
@@ -479,15 +513,8 @@ async function processFinishedFixturesBatch(items) {
         await calculateLeagueStreaks(leagueApiId, seasonYear);
     }
 
-    console.log(`[streak-sync-scheduler] Syncing odds for ${leagueSeasonPairs.size} league/season pair(s) in one pass...`);
-    try {
-        await syncTargetedOdds([...leagueSeasonPairs.values()].map(p => [p.leagueApiId, p.seasonYear]));
-    } catch (error) {
-        console.error(`[streak-sync-scheduler] Batched odds sync failed:`, error.message);
-    }
-
     const markets = await prisma.market.findMany({ where: { slug: { in: STREAK_ELIGIBLE_MARKET_SLUGS } } });
-    const allEntries = [];
+    const changeEventRows = [];
     for (const { dbMatch, homeTeam, awayTeam, teamIds, before, matchLabel } of synced) {
         const after = await snapshotTeamStreaks(teamIds, dbMatch.season_id);
         const teamsById = { [dbMatch.home_team_id]: homeTeam, [dbMatch.away_team_id]: awayTeam };
@@ -503,13 +530,20 @@ async function processFinishedFixturesBatch(items) {
 
                 try {
                     if (!wasActive && isActive) {
-                        allEntries.push(await buildActiveStreakRecord(afterState.id, teamsById[teamId], market.slug, market.name, 'new'));
-                        matchEntryCount++;
+                        const record = await buildActiveStreakRecord(afterState.id, teamsById[teamId], market.slug, market.name, 'new');
+                        if (record) {
+                            changeEventRows.push({ team_streak_id: record.streak_id, change_type: 'new', description: `${record.team} ${record.market} streak is new at ${record.streak_count}.` });
+                            matchEntryCount++;
+                        }
                     } else if (wasActive && isActive) {
-                        allEntries.push(await buildActiveStreakRecord(afterState.id, teamsById[teamId], market.slug, market.name, 'continued'));
-                        matchEntryCount++;
+                        const record = await buildActiveStreakRecord(afterState.id, teamsById[teamId], market.slug, market.name, 'continued');
+                        if (record) {
+                            changeEventRows.push({ team_streak_id: record.streak_id, change_type: 'continued', description: `${record.team} ${record.market} streak continued at ${record.streak_count}.` });
+                            matchEntryCount++;
+                        }
                     } else if (wasActive && !isActive) {
-                        allEntries.push(buildBrokenStreakRecord(beforeState.id, teamsById[teamId], market.name, afterState ? afterState.streak_length : 0));
+                        const record = buildBrokenStreakRecord(beforeState.id, teamsById[teamId], market.name, afterState ? afterState.streak_length : 0);
+                        changeEventRows.push({ team_streak_id: record.streak_id, change_type: 'broken', description: `${record.team} ${record.market} streak broken (now ${record.streak_count}).` });
                         matchEntryCount++;
                     }
                     // neither before nor after active -> nothing changed, nothing to report
@@ -521,265 +555,275 @@ async function processFinishedFixturesBatch(items) {
         console.log(`[streak-sync-scheduler] ${matchLabel} synced - ${matchEntryCount} streak change(s).`);
     }
 
-    upsertTrackedStreaks(allEntries.filter(Boolean));
-    console.log(`[streak-sync-scheduler] Batch done - ${items.length} match(es) synced, ${allEntries.length} total streak change(s).`);
+    if (changeEventRows.length > 0) {
+        await prisma.streakChangeEvent.createMany({ data: changeEventRows });
+    }
+    console.log(`[streak-sync-scheduler] Batch done - ${items.length} match(es) synced, ${changeEventRows.length} total streak change event(s) logged.`);
 }
 
 // Convenience wrapper for syncing exactly one match immediately (used by
-// direct/manual calls) - just a batch of one.
+// direct/manual calls and tests) - just a batch of one.
 async function syncFinishedMatch(apiFixture, dbMatch) {
     return processFinishedFixturesBatch([{ apiFixture, dbMatch }]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Debounced batching for the live per-match timer flow. Matches in the same
-// league very often share a kickoff time, so their "just turned finished"
-// checks tend to land within moments of each other too - instead of syncing
-// each one the instant it's detected, queue it and reset a short timer on
-// every new arrival, so the batch only flushes once arrivals stop (whether
-// that's one match alone, or a whole matchday's worth). This is also what
-// resyncStaleMatches relies on to collapse a downtime backlog into as few
-// league/season recalculations as possible.
+// Odds-change detection - in-memory only for now (per explicit instruction;
+// durability/memory footprint to be revisited later if it turns out to be a
+// problem). Keyed by team_streak_id -> { value, bookmaker } | null. A streak
+// seen for the first time just seeds the map - there's no "before" to
+// compare against yet, so it never logs a change on its first tick.
 // ─────────────────────────────────────────────────────────────────────────
-const FINISH_BATCH_DEBOUNCE_MS = 5000;
-const pendingFinishedFixtures = [];
-let finishBatchFlushTimer = null;
+const previousBestOdds = new Map();
 
-function enqueueFinishedFixture(apiFixture, dbMatch) {
-    if (pendingFinishedFixtures.some(item => item.dbMatch.id === dbMatch.id)) return;
-    pendingFinishedFixtures.push({ apiFixture, dbMatch });
-    if (finishBatchFlushTimer) clearTimeout(finishBatchFlushTimer);
-    finishBatchFlushTimer = setTimeout(flushFinishedFixtureQueue, FINISH_BATCH_DEBOUNCE_MS);
-}
+async function detectOddsChanges() {
+    console.log('[streak-sync-scheduler] Checking active streaks for odds changes...');
+    const windowEnd = new Date(Date.now() + DETECTION_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-async function flushFinishedFixtureQueue() {
-    finishBatchFlushTimer = null;
-    if (pendingFinishedFixtures.length === 0) return;
-    const batch = pendingFinishedFixtures.splice(0, pendingFinishedFixtures.length);
-    try {
-        await processFinishedFixturesBatch(batch);
-    } catch (error) {
-        console.error('[streak-sync-scheduler] Batch flush failed:', error.message);
+    const activeStreaks = await prisma.teamStreak.findMany({
+        where: { streak_length: { gte: 3 } },
+        include: { team: true, market: true }
+    });
+
+    let changeCount = 0;
+    for (const ts of activeStreaks) {
+        const nextMatch = await prisma.match.findFirst({
+            where: {
+                season_id: ts.season_id,
+                status: { notIn: FINISHED_STATUSES },
+                OR: [{ home_team_id: ts.team_id }, { away_team_id: ts.team_id }]
+            },
+            orderBy: { kickoff_at: 'asc' }
+        });
+        if (!nextMatch || nextMatch.kickoff_at > windowEnd) continue;
+
+        const avgRow = await prisma.teamSeasonAverage.findFirst({
+            where: { team_id: ts.team_id, season_id: ts.season_id, market_id: ts.market_id }
+        });
+        const avgValue = avgRow ? Number(avgRow.avg_value) : 0;
+        const threshold = (avgValue % 1 === 0) ? avgValue : Math.floor(avgValue) + 0.5;
+        const direction = ts.streak_direction === 'below' ? 'over' : 'under';
+        const binary = BINARY_MARKET_OUTCOMES[ts.market.slug];
+        const suggestedOutcome = binary ? (ts.streak_direction === 'below' ? binary.positive : binary.negative) : null;
+
+        const currentOdd = await getBestOddForStreak(ts.team_id, ts.market.slug, direction, threshold, binary, suggestedOutcome, nextMatch);
+        const previous = previousBestOdds.get(ts.id);
+
+        if (previous !== undefined) {
+            const changed = (previous?.value ?? null) !== (currentOdd?.value ?? null) || (previous?.bookmaker ?? null) !== (currentOdd?.bookmaker ?? null);
+            if (changed) {
+                await logChangeEvent(
+                    ts.id,
+                    'odds_changed',
+                    `Best odd for ${ts.team.name} ${ts.market.name} changed from ${previous?.value ?? '—'} (${previous?.bookmaker ?? '—'}) to ${currentOdd?.value ?? '—'} (${currentOdd?.bookmaker ?? '—'}).`
+                );
+                changeCount++;
+            }
+        }
+        previousBestOdds.set(ts.id, currentOdd);
     }
+    console.log(`[streak-sync-scheduler] Odds change detection done - ${changeCount} change(s) logged.`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Scheduling
+// Per-league fixture sync - status/postponed/kickoff-time/live, all from one
+// bulk API call spanning FIXTURE_LOOKBACK_DAYS back through FIXTURE_WINDOW_DAYS
+// ahead, so a match still stuck in a non-final status from before now (server
+// downtime, a missed check) gets rediscovered the same way an upcoming one
+// does - it doesn't need its own scheduled check, just to fall inside this
+// range on some future tick. Returns the list of { apiFixture, dbMatch } for
+// fixtures that just turned finished this pass (apiFixture here is the FULL
+// detail version, with statistics - see the second fetch below).
 // ─────────────────────────────────────────────────────────────────────────
-
-// One scheduled check for one match: ask the live API about this single
-// fixture.
-//   - Finished (any check, not just the last) -> run the full sync, once -
-//     the FINISHED_STATUSES guard below makes any later check for this
-//     match a no-op.
-//   - Still live -> update just status + the live score in Match, so the
-//     admin panel reflects what's actually happening mid-game; averages/
-//     standings/streaks only get (re)computed once there's a final score.
-//   - Still not finished on the last scheduled check -> log a warning
-//     (extra time/penalties or an unusually delayed match can outlast this
-//     5-check schedule).
-async function checkAndProcessMatch(matchId, offsetMin, isLastCheck) {
-    const checkLabel = offsetMin === null ? 'immediate stale-resync' : `+${offsetMin}min`;
-    console.log(`[streak-sync-scheduler] Running ${checkLabel} check for match ${matchId}...`);
-
-    const dbMatch = await prisma.match.findUnique({
-        where: { id: matchId },
+async function syncFixturesForLeague(leagueApiId, seasonYear) {
+    const dbMatches = await prisma.match.findMany({
+        where: {
+            status: { notIn: FINISHED_STATUSES },
+            season: { year: String(seasonYear), league: { id_api: String(leagueApiId) } }
+        },
         include: { homeTeam: true, awayTeam: true, season: { include: { league: true } } }
     });
-    if (!dbMatch) {
-        console.warn(`[streak-sync-scheduler] Match ${matchId} no longer exists in the DB, skipping check.`);
-        return;
-    }
-    const matchLabel = `${dbMatch.homeTeam.name} vs ${dbMatch.awayTeam.name} (API ${dbMatch.id_api})`;
-    if (FINISHED_STATUSES.includes(dbMatch.status)) {
-        console.log(`[streak-sync-scheduler] ${matchLabel} already finished (synced by an earlier check), skipping.`);
-        return;
-    }
+    if (dbMatches.length === 0) return [];
 
-    let apiFixture;
+    const dbMatchesByIdApi = new Map(dbMatches.map(m => [m.id_api, m]));
+
+    const today = new Date();
+    const windowStart = new Date(today.getTime() - FIXTURE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(today.getTime() + FIXTURE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+    let apiFixtures;
     try {
-        apiFixture = await fetchSingleFixture(dbMatch.id_api);
-    } catch (error) {
-        console.error(`[streak-sync-scheduler] API lookup failed for ${dbMatch.id_api}:`, error.message);
-        return;
-    }
-    if (!apiFixture) {
-        console.warn(`[streak-sync-scheduler] API returned no fixture for ${dbMatch.id_api}.`);
-        return;
-    }
-
-    const newStatus = apiFixture.fixture.status.short;
-
-    if (FINISHED_STATUSES.includes(newStatus)) {
-        console.log(`[streak-sync-scheduler] ${matchLabel} is finished (${newStatus}, ${apiFixture.goals.home}-${apiFixture.goals.away}) - queued for batched sync.`);
-        enqueueFinishedFixture(apiFixture, dbMatch);
-        return { finished: true };
-    }
-
-    if (newStatus !== dbMatch.status || apiFixture.goals.home !== dbMatch.home_score || apiFixture.goals.away !== dbMatch.away_score) {
-        await prisma.match.update({
-            where: { id: matchId },
-            data: { status: newStatus, home_score: apiFixture.goals.home, away_score: apiFixture.goals.away }
+        const response = await axios.get(`${BASE_URL}/fixtures`, {
+            headers: { 'x-apisports-key': API_KEY },
+            params: {
+                league: leagueApiId,
+                season: seasonYear,
+                from: windowStart.toISOString().slice(0, 10),
+                to: windowEnd.toISOString().slice(0, 10)
+            }
         });
-        console.log(`[streak-sync-scheduler] ${matchLabel} -> ${newStatus} (${apiFixture.goals.home}-${apiFixture.goals.away}).`);
-    } else {
-        console.log(`[streak-sync-scheduler] ${matchLabel} - no change (still "${newStatus}", ${apiFixture.goals.home}-${apiFixture.goals.away}).`);
+        apiFixtures = response.data?.response || [];
+    } catch (error) {
+        console.error(`[streak-sync-scheduler] Fixture list fetch failed for league ${leagueApiId}/${seasonYear}:`, error.message);
+        return [];
     }
 
-    if (isLastCheck) {
-        console.warn(`[streak-sync-scheduler] ${matchLabel} still "${newStatus}" ${offsetMin}min after kickoff - no further checks scheduled for this match.`);
-    }
+    const newlyFinishedIds = [];
 
-    return { finished: false };
-}
-
-// Postponed matches don't have a trustworthy kickoff_at to schedule against,
-// so they're handled separately from the NS/24h-lookahead query below:
-// re-check each one's real status directly, and if the API now gives it a
-// fresh NS date, write that to the DB. The NS query right after this picks
-// it up automatically the moment it's genuinely NS again.
-async function recheckPostponedMatches() {
-    const postponed = await prisma.match.findMany({ where: { status: 'PST' } });
-    if (postponed.length === 0) {
-        console.log('[streak-sync-scheduler] No postponed matches to recheck.');
-        return;
-    }
-    console.log(`[streak-sync-scheduler] Rechecking ${postponed.length} postponed match(es)...`);
-
-    for (const match of postponed) {
-        let apiFixture;
-        try {
-            apiFixture = await fetchSingleFixture(match.id_api);
-        } catch (error) {
-            console.error(`[streak-sync-scheduler] Postponed-match recheck failed for ${match.id_api}:`, error.message);
-            continue;
-        }
-        if (!apiFixture) continue;
+    for (const apiFixture of apiFixtures) {
+        const idApi = String(apiFixture.fixture.id);
+        const dbMatch = dbMatchesByIdApi.get(idApi);
+        if (!dbMatch) continue; // not a match this script creates - only syncs existing ones
 
         const newStatus = apiFixture.fixture.status.short;
-        if (newStatus === 'PST') continue; // still postponed - nothing to do this cycle
+        const newKickoff = new Date(apiFixture.fixture.date);
+        const oldStatus = dbMatch.status;
+        const oldKickoff = dbMatch.kickoff_at;
+        const matchLabel = `${dbMatch.homeTeam.name} vs ${dbMatch.awayTeam.name} (API ${idApi})`;
 
-        const newKickoff = apiFixture.fixture.date ? new Date(apiFixture.fixture.date) : match.kickoff_at;
-        await prisma.match.update({ where: { id: match.id }, data: { status: newStatus, kickoff_at: newKickoff } });
-        console.log(`[streak-sync-scheduler] Postponed match API ${match.id_api} is now "${newStatus}" (kickoff ${newKickoff?.toISOString()}).`);
-    }
-}
+        const becamePostponed = newStatus === 'PST' && oldStatus !== 'PST';
+        const unpostponed = oldStatus === 'PST' && newStatus !== 'PST';
+        if (becamePostponed || unpostponed) {
+            const description = becamePostponed
+                ? `${matchLabel} was postponed.`
+                : `${matchLabel} is no longer postponed - new kickoff ${newKickoff.toISOString()}.`;
+            console.log(`[streak-sync-scheduler] ${description}`);
+            await logChangeEventsForMatchStreaks(dbMatch.home_team_id, dbMatch.away_team_id, dbMatch.season_id, 'postponed', description);
+        }
 
-// Matches still marked "NS" whose kickoff already passed - the server was
-// off (or missed a restart window) through their entire scheduled-check
-// lifetime, so no timer ever ran for them and they'd otherwise sit stale
-// forever (the NS/24h query below only ever looks forward). For each one:
-// run one immediate check right now to catch it up to reality - if it's
-// already finished that's the full sync, done in one shot; if it's
-// somehow still genuinely live, schedule only whichever of the normal
-// offsets still lie in the future so the rest of its lifecycle is covered
-// normally. Runs sequentially (not fired as parallel timers) so two checks
-// for the same match can never race each other.
-async function resyncStaleMatches() {
-    const now = new Date();
-    const staleCutoff = new Date(now.getTime() - STALE_LOOKBACK_MS);
+        if (newKickoff.getTime() !== oldKickoff.getTime()) {
+            const description = `${matchLabel} kickoff time changed from ${oldKickoff.toISOString()} to ${newKickoff.toISOString()}.`;
+            console.log(`[streak-sync-scheduler] ${description}`);
+            await logChangeEventsForMatchStreaks(dbMatch.home_team_id, dbMatch.away_team_id, dbMatch.season_id, 'kickoff_changed', description);
+        }
 
-    const staleMatches = await prisma.match.findMany({
-        where: { status: 'NS', kickoff_at: { lt: now, gte: staleCutoff } },
-        select: { id: true, id_api: true, kickoff_at: true }
-    });
-
-    if (staleMatches.length === 0) {
-        console.log('[streak-sync-scheduler] No stale NS matches to resync.');
-        return;
-    }
-    console.log(`[streak-sync-scheduler] Found ${staleMatches.length} stale NS match(es) whose kickoff already passed unchecked - resyncing now...`);
-
-    for (const match of staleMatches) {
-        if (scheduledMatchIds.has(match.id)) continue;
-        scheduledMatchIds.add(match.id);
-
-        console.log(`[streak-sync-scheduler] Resyncing stale match ${match.id} (API ${match.id_api}, kickoff was ${match.kickoff_at.toISOString()})...`);
-        let result;
-        try {
-            result = await checkAndProcessMatch(match.id, null, false);
-        } catch (error) {
-            console.error(`[streak-sync-scheduler] Stale resync failed for match ${match.id}:`, error.message);
+        if (FINISHED_STATUSES.includes(newStatus)) {
+            console.log(`[streak-sync-scheduler] ${matchLabel} is finished (${newStatus}, ${apiFixture.goals.home}-${apiFixture.goals.away}) - queued for detail fetch + batched sync.`);
+            newlyFinishedIds.push(idApi);
             continue;
         }
 
-        if (result && !result.finished) {
-            // Genuinely still in progress - cover whatever's left of its
-            // schedule, skipping any offset the immediate check above
-            // already covers.
-            SCHEDULE_OFFSETS_MIN.forEach((offsetMin, i) => {
-                const fireAt = match.kickoff_at.getTime() + offsetMin * 60 * 1000;
-                if (fireAt <= Date.now()) return;
-                const delay = fireAt - Date.now();
-                const isLastCheck = i === SCHEDULE_OFFSETS_MIN.length - 1;
-                setTimeout(() => {
-                    checkAndProcessMatch(match.id, offsetMin, isLastCheck).catch(error =>
-                        console.error(`[streak-sync-scheduler] Check failed for match ${match.id}:`, error.message)
-                    );
-                }, delay);
+        const scoreChanged = apiFixture.goals.home !== dbMatch.home_score || apiFixture.goals.away !== dbMatch.away_score;
+        const statusChanged = newStatus !== oldStatus;
+        const kickoffChanged = newKickoff.getTime() !== oldKickoff.getTime();
+        if (statusChanged || scoreChanged || kickoffChanged) {
+            await prisma.match.update({
+                where: { id: dbMatch.id },
+                data: { status: newStatus, home_score: apiFixture.goals.home, away_score: apiFixture.goals.away, kickoff_at: newKickoff }
             });
+            console.log(`[streak-sync-scheduler] ${matchLabel} -> ${newStatus} (${apiFixture.goals.home}-${apiFixture.goals.away})${kickoffChanged ? ', kickoff updated' : ''}.`);
         }
     }
-}
 
-async function scanForUpcomingMatches() {
-    const now = new Date();
-    console.log(`[streak-sync-scheduler] Scan tick starting at ${now.toISOString()}...`);
+    if (newlyFinishedIds.length === 0) return [];
 
-    await resyncStaleMatches();
-    await recheckPostponedMatches();
-
-    const matches = await prisma.match.findMany({
-        where: { status: 'NS', kickoff_at: { gte: now, lte: new Date(now.getTime() + LOOKAHEAD_MS) } },
-        select: { id: true, id_api: true, kickoff_at: true }
-    });
-    console.log(`[streak-sync-scheduler] Found ${matches.length} NS match(es) kicking off in the next 24h.`);
-
-    let scheduledCount = 0;
-    for (const match of matches) {
-        if (scheduledMatchIds.has(match.id)) continue;
-        scheduledMatchIds.add(match.id);
-        scheduledCount++;
-
-        console.log(`[streak-sync-scheduler] Scheduling checks for match ${match.id} (API ${match.id_api}, kickoff ${match.kickoff_at.toISOString()}) at +${SCHEDULE_OFFSETS_MIN.join('/')}min.`);
-
-        SCHEDULE_OFFSETS_MIN.forEach((offsetMin, i) => {
-            const fireAt = match.kickoff_at.getTime() + offsetMin * 60 * 1000;
-            const delay = fireAt - Date.now();
-            const isLastCheck = i === SCHEDULE_OFFSETS_MIN.length - 1;
-            setTimeout(() => {
-                checkAndProcessMatch(match.id, offsetMin, isLastCheck).catch(error =>
-                    console.error(`[streak-sync-scheduler] Check failed for match ${match.id}:`, error.message)
-                );
-            }, Math.max(0, delay));
-        });
+    // The list endpoint above doesn't include per-match statistics - a
+    // second, detail-level bulk fetch (batched by id, same pattern
+    // pop-db.js's initial sync already uses) is needed before these can be
+    // safely handed to the stats-writing pipeline.
+    const finishedBatch = [];
+    for (const idsChunk of chunkArray(newlyFinishedIds, 20)) {
+        try {
+            const detailResponse = await axios.get(`${BASE_URL}/fixtures`, {
+                headers: { 'x-apisports-key': API_KEY },
+                params: { ids: idsChunk.join('-') }
+            });
+            for (const detailedFixture of (detailResponse.data?.response || [])) {
+                const dbMatch = dbMatchesByIdApi.get(String(detailedFixture.fixture.id));
+                if (dbMatch) finishedBatch.push({ apiFixture: detailedFixture, dbMatch });
+            }
+        } catch (error) {
+            console.error(`[streak-sync-scheduler] Finished-fixture detail fetch failed for league ${leagueApiId}/${seasonYear}:`, error.message);
+        }
     }
 
-    console.log(`[streak-sync-scheduler] Scan tick done - ${scheduledCount} new match(es) scheduled, ${scheduledMatchIds.size} total tracked this run.`);
+    return finishedBatch;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// The unified tick
+// ─────────────────────────────────────────────────────────────────────────
+async function runUnifiedSync() {
+    console.log(`[streak-sync-scheduler] Unified sync tick starting at ${new Date().toISOString()}...`);
+
+    // Gap B (independent of everything below - a match here doesn't need a
+    // non-finished status anywhere, it's already FT, just possibly missing
+    // its grading): reconstruct any StreakResult rows that should exist for
+    // the last RESULT_BACKFILL_LOOKBACK_DAYS but don't. Safe to run every
+    // tick - backfillStreakResults skips (match, team, market) combos that
+    // already have a row.
+    try {
+        await backfillStreakResults(RESULT_BACKFILL_LOOKBACK_DAYS);
+    } catch (error) {
+        console.error('[streak-sync-scheduler] StreakResult backfill failed:', error.message);
+    }
+
+    const targetSeasons = await prisma.match.findMany({
+        where: { status: { notIn: FINISHED_STATUSES } },
+        distinct: ['season_id'],
+        select: { season: { select: { year: true, league: { select: { id_api: true } } } } }
+    });
+    const leagueSeasonPairs = targetSeasons.map(m => [m.season.league.id_api, m.season.year]);
+
+    if (leagueSeasonPairs.length === 0) {
+        console.log('[streak-sync-scheduler] No leagues with non-finished matches - nothing to sync this tick.');
+        return;
+    }
+    console.log(`[streak-sync-scheduler] Syncing fixtures for ${leagueSeasonPairs.length} league/season pair(s)...`);
+
+    const allFinished = [];
+    for (const [leagueApiId, seasonYear] of leagueSeasonPairs) {
+        const finished = await syncFixturesForLeague(leagueApiId, seasonYear);
+        allFinished.push(...finished);
+    }
+
+    if (allFinished.length > 0) {
+        try {
+            await processFinishedFixturesBatch(allFinished);
+        } catch (error) {
+            console.error('[streak-sync-scheduler] Finished-match batch processing failed:', error.message);
+        }
+    }
+
+    console.log(`[streak-sync-scheduler] Syncing odds for ${leagueSeasonPairs.length} league/season pair(s)...`);
+    try {
+        await syncTargetedOdds(leagueSeasonPairs);
+    } catch (error) {
+        console.error('[streak-sync-scheduler] Odds sync failed:', error.message);
+    }
+
+    try {
+        await detectOddsChanges();
+    } catch (error) {
+        console.error('[streak-sync-scheduler] Odds change detection failed:', error.message);
+    }
+
+    console.log('[streak-sync-scheduler] Unified sync tick done.');
 }
 
 function startStreakSyncScheduler() {
-    console.log('🗓️  Starting Streak Sync Scheduler...');
+    console.log('🗓️  Starting Unified Streak Sync (every 15 minutes)...');
     const tick = async () => {
         try {
             await connectDB();
-            await scanForUpcomingMatches();
+            await runUnifiedSync();
         } catch (error) {
-            console.error('[streak-sync-scheduler] Scan failed:', error.message);
+            console.error('[streak-sync-scheduler] Unified sync tick failed:', error.message);
         }
     };
     tick();
-    setInterval(tick, SCAN_INTERVAL_MS);
-    console.log(`[streak-sync-scheduler] Scheduled to scan every ${SCAN_INTERVAL_MS / 60000} minutes.`);
+    setInterval(tick, UNIFIED_INTERVAL_MS);
+    console.log(`[streak-sync-scheduler] Scheduled to run every ${UNIFIED_INTERVAL_MS / 60000} minutes.`);
 }
 
 module.exports = {
     startStreakSyncScheduler,
-    scanForUpcomingMatches,
-    resyncStaleMatches,
-    recheckPostponedMatches,
-    checkAndProcessMatch,
-    syncFinishedMatch,
+    runUnifiedSync,
+    syncFixturesForLeague,
+    detectOddsChanges,
     processFinishedFixturesBatch,
-    flushFinishedFixtureQueue
+    syncFinishedMatch,
+    resolveCurrentStreakData,
+    buildActiveStreakRecord,
+    buildBrokenStreakRecord
 };

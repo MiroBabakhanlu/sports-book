@@ -1,5 +1,22 @@
 const { default: axios } = require('axios');
 const { prisma } = require('./src/utils/prisma');
+const { SLUG_MAP } = require('./src/services/teams.service');
+
+// Raw odds-provider market slugs we actually track (the keys of SLUG_MAP -
+// same mapping used everywhere else this codebase resolves canonical <->
+// raw market slugs). The API returns dozens of bet types per bookmaker
+// (Match Winner, Correct Score, Asian Handicap, etc.) that we never use -
+// skipping them before any DB write is the single biggest speedup here,
+// since writing every irrelevant selection was most of the total volume.
+const TRACKED_RAW_SLUGS = new Set(Object.keys(SLUG_MAP));
+
+function chunkArray(array, size) {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += size) {
+        chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
+}
 
 // 1. Helper for Market Names (NO DOTS)
 function formatMarketSlug(value) {
@@ -74,6 +91,7 @@ async function syncTargetedOdds(targetLeagues) {
         });
 
         let totalUpserts = 0;
+        let totalSkipped = 0;
 
         for (const [key, task] of activeTasks.entries()) {
             let currentPage = 1;
@@ -89,6 +107,12 @@ async function syncTargetedOdds(targetLeagues) {
 
                 totalPages = response.data?.paging?.total || 1;
                 const fixturesPayload = response.data?.response || [];
+
+                // Collect this page's writes and fire them in batched chunks at
+                // the end instead of one sequentially-awaited round trip per
+                // selection - with thousands of selections per page, that
+                // serialization was the other major source of the slowness.
+                const pendingUpserts = [];
 
                 for (const fixtureItem of fixturesPayload) {
                     const apiFixtureId = String(fixtureItem.fixture.id);
@@ -110,9 +134,16 @@ async function syncTargetedOdds(targetLeagues) {
                             bookmakerLookupByName[bookmaker.name] = internalBookmakerId;
                         }
 
-                        // B. Process Bets
+                        // B. Process Bets - skip anything that isn't one of our
+                        // tracked markets before touching the DB at all.
                         for (const bet of bookmaker.bets) {
                             const marketSlug = formatMarketSlug(bet.name);
+
+                            if (!TRACKED_RAW_SLUGS.has(marketSlug)) {
+                                totalSkipped += bet.values.length;
+                                continue;
+                            }
+
                             let internalMarketId = marketLookupBySlug[marketSlug];
 
                             if (!internalMarketId) {
@@ -134,7 +165,7 @@ async function syncTargetedOdds(targetLeagues) {
                             for (const selection of bet.values) {
                                 const standardizedSlug = formatSelectionSlug(selection.value);
 
-                                await prisma.matchOdds.upsert({
+                                pendingUpserts.push(prisma.matchOdds.upsert({
                                     where: {
                                         match_market_bookmaker_slug: {
                                             match_id: localMatch.id,
@@ -154,16 +185,21 @@ async function syncTargetedOdds(targetLeagues) {
                                         slug: standardizedSlug,
                                         odd: selection.odd
                                     }
-                                });
+                                }));
                                 totalUpserts++;
                             }
                         }
                     }
                 }
+
+                for (const chunk of chunkArray(pendingUpserts, 100)) {
+                    await prisma.$transaction(chunk);
+                }
+
                 currentPage++;
             } while (currentPage <= totalPages);
         }
-        console.log(`✅ [Odds Pipeline] Processed successfully. Total database updates: ${totalUpserts}`);
+        console.log(`✅ [Odds Pipeline] Processed successfully. ${totalUpserts} update(s) written, ${totalSkipped} irrelevant selection(s) skipped.`);
     } catch (error) {
         console.error("❌ [Odds Pipeline] Error:", error.message);
     }

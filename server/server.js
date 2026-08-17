@@ -15,6 +15,7 @@ const bookmakerRoutes = require('./src/routes/bookmaker.routes');
 const bookmakersRoutes = require('./src/routes/main/bookmakers.routes');
 const leaguesRoutes = require('./src/routes/main/leagues.routes');
 const streaksRoutes = require('./src/routes/main/streaks.routes');
+const streakChangesRoutes = require('./src/routes/main/streak-changes.routes');
 const clicksRoutes = require('./src/routes/main/clicks.routes');
 const matchupRoutes = require('./src/routes/main/matchup.routes');
 const standingsRoutes = require('./src/routes/main/standings.routes');
@@ -136,6 +137,11 @@ app.use('/api/bookmaker', bookmakerRoutes)
 // hosted client actually calls cross-origin.
 app.use('/api/bookmakers', cors(corsOptions), authMiddleware, bookmakersRoutes)
 app.use('/api/leagues', cors(corsOptions), authMiddleware, leaguesRoutes)
+// streakChangesRoutes registered BEFORE streaksRoutes - it defines /changes
+// and /changes/ack, and streaksRoutes' GET /:id would otherwise swallow
+// "/changes" as if "changes" were a streak id, since Express matches routes
+// in registration order.
+app.use('/api/streaks', cors(corsOptions), authMiddleware, streakChangesRoutes)
 app.use('/api/streaks', cors(corsOptions), authMiddleware, streaksRoutes)
 app.use('/api/clicks', cors(corsOptions), authMiddleware, clicksRoutes)
 app.use('/api/matchup', cors(corsOptions), authMiddleware, matchupRoutes)

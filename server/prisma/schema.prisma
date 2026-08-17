@@ -260,8 +260,32 @@ model TeamStreak {
   season Season @relation(fields: [season_id], references: [id])
   market Market @relation(fields: [market_id], references: [id])
 
+  changeEvents StreakChangeEvent[]
+
   @@unique([team_id, season_id, market_id], name: "team_id_season_id_market_id")
   @@map("TEAM_STREAK")
+}
+
+// One row per detected change for an upcoming/active streak - new, continued,
+// broken, odds moved, match postponed, or kickoff time shifted. The external
+// (PHP) server polls GET /api/streaks/changes for unsent rows (sent_at IS
+// NULL), resolved to the streak's CURRENT live data (not a frozen snapshot -
+// this table only records THAT something changed, never the actual old/new
+// values), then acks the ids it successfully processed via POST
+// /api/streaks/changes/ack, which sets sent_at. A row that's fetched but
+// never acked simply stays sent_at IS NULL and gets included again next
+// poll - no separate timeout/retry bookkeeping needed.
+model StreakChangeEvent {
+  id             Int       @id @default(autoincrement())
+  team_streak_id Int
+  change_type    String // 'new' | 'continued' | 'broken' | 'odds_changed' | 'postponed' | 'kickoff_changed'
+  description    String?
+  sent_at        DateTime?
+  created_at     DateTime  @default(now())
+
+  teamStreak TeamStreak @relation(fields: [team_streak_id], references: [id])
+
+  @@map("STREAK_CHANGE_EVENT")
 }
 
 model TeamStanding {
