@@ -25,6 +25,7 @@ const route = express.Router();
  *           properties:
  *             key: { type: string, example: 'team_goals' }
  *             label: { type: string, example: 'Team Goals' }
+ *         streak_side: { type: string, enum: [home, away], description: 'Which side (home/away) the streak/prediction is actually about - both teams are shown side by side, but only one of them is the subject' }
  *         prediction:
  *           type: object
  *           properties:
@@ -119,7 +120,7 @@ const route = express.Router();
  *         schema: { type: number }
  *       - in: query
  *         name: markets
- *         description: Comma-separated market keys (team_goals, total_goals, team_yellow_cards, total_yellow_cards, team_red_cards, total_red_cards, team_corners, total_corners, total_goals_1st_half, total_goals_2nd_half)
+ *         description: Comma-separated market keys (team_goals, total_goals, team_yellow_cards, total_yellow_cards, team_red_cards, total_red_cards, team_corners, total_corners, total_goals_1st_half, total_goals_2nd_half, both_teams_score, odd_even)
  *         schema: { type: string }
  *       - in: query
  *         name: leagues

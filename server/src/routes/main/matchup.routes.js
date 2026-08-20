@@ -41,14 +41,34 @@ const route = express.Router();
  *                   type: object
  *                   properties:
  *                     streak_id: { type: string, example: 'streak_921' }
+ *                     streak_count: { type: integer, example: 9 }
  *                     market:
  *                       type: object
  *                       properties:
  *                         key: { type: string, example: 'team_goals' }
  *                         label: { type: string, example: 'Team Goals' }
+ *                     prediction:
+ *                       type: object
+ *                       description: Same shape as the Streak schema's prediction - see GET /streaks
+ *                       properties:
+ *                         text: { type: string }
+ *                         threshold: { type: number }
+ *                         direction: { type: string, enum: [over, under] }
+ *                         average: { type: number }
+ *                         description: { type: string }
+ *                     confidence: { type: integer, example: 85 }
+ *                     confidence_label: { type: string, enum: [High, Good, Moderate] }
+ *                     status: { type: string, enum: [live, soon, upcoming] }
+ *                     odds:
+ *                       type: object
+ *                       properties:
+ *                         home_win: { $ref: '#/components/schemas/Odd' }
+ *                         away_win: { $ref: '#/components/schemas/Odd' }
+ *                         recommended: { $ref: '#/components/schemas/Odd' }
  *                     match:
  *                       type: object
  *                       description: Same match object shape as GET /streaks/{id}, except home/away each also carry a `position` (current league standing, null if not yet computed for this season)
+ *                     streak_side: { type: string, enum: [home, away], description: 'Which side (home/away) the streak/prediction is actually about - both teams are returned side by side, but only one of them is the subject' }
  *                     home: { $ref: '#/components/schemas/MatchupSide' }
  *                     away: { $ref: '#/components/schemas/MatchupSide' }
  *                     chartData:
