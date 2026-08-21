@@ -19,6 +19,7 @@ const streakChangesRoutes = require('./src/routes/main/streak-changes.routes');
 const clicksRoutes = require('./src/routes/main/clicks.routes');
 const matchupRoutes = require('./src/routes/main/matchup.routes');
 const standingsRoutes = require('./src/routes/main/standings.routes');
+const generalInfoRoutes = require('./src/routes/main/general-info.routes');
 
 const { runPipelines } = require('./pop-db');
 const { runOddsPipeline } = require('./odds-pipeline');
@@ -146,6 +147,7 @@ app.use('/api/streaks', cors(corsOptions), authMiddleware, streaksRoutes)
 app.use('/api/clicks', cors(corsOptions), authMiddleware, clicksRoutes)
 app.use('/api/matchup', cors(corsOptions), authMiddleware, matchupRoutes)
 app.use('/api/standings', cors(corsOptions), authMiddleware, standingsRoutes)
+app.use('/api/general-info', cors(corsOptions), authMiddleware, generalInfoRoutes)
 
 // Swagger UI for the main-site endpoints above. Docs live as @openapi JSDoc
 // blocks next to each route (src/routes/main/*.routes.js) so they can't drift

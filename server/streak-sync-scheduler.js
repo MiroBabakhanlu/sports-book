@@ -379,7 +379,10 @@ async function getBestOddForStreak(teamId, marketSlug, direction, threshold, bin
 // it - used both when building a new/continued record after a finish, and
 // when resolving a StreakChangeEvent to current data for GET /changes.
 async function buildActiveStreakRecord(teamStreakId, team, marketSlug, marketName, status) {
-    const teamStreak = await prisma.teamStreak.findUnique({ where: { id: teamStreakId } });
+    const teamStreak = await prisma.teamStreak.findUnique({
+        where: { id: teamStreakId },
+        include: { market: { include: { sport: true } } }
+    });
     if (!teamStreak) return null;
 
     const nextMatch = await prisma.match.findFirst({
@@ -408,6 +411,7 @@ async function buildActiveStreakRecord(teamStreakId, team, marketSlug, marketNam
         status, // 'new' | 'continued'
         team: team.name,
         market: marketName,
+        aimed_sport: teamStreak.market.sport.slug,
         streak_count: teamStreak.streak_length,
         confidence: teamStreak.confidence != null ? Number(teamStreak.confidence) : null,
         direction: binary ? null : direction,
@@ -416,6 +420,7 @@ async function buildActiveStreakRecord(teamStreakId, team, marketSlug, marketNam
         avg_value: avgValue,
         next_match: nextMatch ? {
             id_api: nextMatch.id_api,
+            status: nextMatch.status, // e.g. 'NS', 'PST' - lets a postponed/kickoff_changed event be read structurally instead of parsing `description`
             kickoff_at: nextMatch.kickoff_at,
             home: nextMatch.homeTeam.name,
             away: nextMatch.awayTeam.name,
@@ -426,12 +431,13 @@ async function buildActiveStreakRecord(teamStreakId, team, marketSlug, marketNam
     };
 }
 
-function buildBrokenStreakRecord(teamStreakId, team, marketName, newStreakLength) {
+function buildBrokenStreakRecord(teamStreakId, team, marketName, newStreakLength, aimedSport) {
     return {
         streak_id: teamStreakId,
         status: 'broken',
         team: team.name,
         market: marketName,
+        aimed_sport: aimedSport,
         streak_count: newStreakLength,
         updated_at: new Date().toISOString()
     };
@@ -443,12 +449,12 @@ function buildBrokenStreakRecord(teamStreakId, team, marketName, newStreakLength
 async function resolveCurrentStreakData(teamStreakId) {
     const teamStreak = await prisma.teamStreak.findUnique({
         where: { id: teamStreakId },
-        include: { team: true, market: true }
+        include: { team: true, market: { include: { sport: true } } }
     });
     if (!teamStreak) return null;
 
     if (teamStreak.streak_length < 3) {
-        return buildBrokenStreakRecord(teamStreak.id, teamStreak.team, teamStreak.market.name, teamStreak.streak_length);
+        return buildBrokenStreakRecord(teamStreak.id, teamStreak.team, teamStreak.market.name, teamStreak.streak_length, teamStreak.market.sport.slug);
     }
     return buildActiveStreakRecord(teamStreak.id, teamStreak.team, teamStreak.market.slug, teamStreak.market.name, 'continued');
 }
@@ -513,7 +519,7 @@ async function processFinishedFixturesBatch(items) {
         await calculateLeagueStreaks(leagueApiId, seasonYear);
     }
 
-    const markets = await prisma.market.findMany({ where: { slug: { in: STREAK_ELIGIBLE_MARKET_SLUGS } } });
+    const markets = await prisma.market.findMany({ where: { slug: { in: STREAK_ELIGIBLE_MARKET_SLUGS } }, include: { sport: true } });
     const changeEventRows = [];
     for (const { dbMatch, homeTeam, awayTeam, teamIds, before, matchLabel } of synced) {
         const after = await snapshotTeamStreaks(teamIds, dbMatch.season_id);
@@ -542,7 +548,7 @@ async function processFinishedFixturesBatch(items) {
                             matchEntryCount++;
                         }
                     } else if (wasActive && !isActive) {
-                        const record = buildBrokenStreakRecord(beforeState.id, teamsById[teamId], market.name, afterState ? afterState.streak_length : 0);
+                        const record = buildBrokenStreakRecord(beforeState.id, teamsById[teamId], market.name, afterState ? afterState.streak_length : 0, market.sport.slug);
                         changeEventRows.push({ team_streak_id: record.streak_id, change_type: 'broken', description: `${record.team} ${record.market} streak broken (now ${record.streak_count}).` });
                         matchEntryCount++;
                     }

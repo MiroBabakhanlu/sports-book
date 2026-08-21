@@ -231,7 +231,7 @@ async function buildRawCandidates() {
             season: { is_current: true }
         },
         include: {
-            market: { select: { id: true, slug: true } },
+            market: { select: { id: true, slug: true, sport: { select: { slug: true } } } },
             season: { select: { id: true, league: { select: { id: true, name: true, country: true } } } }
         }
     });
@@ -359,6 +359,7 @@ async function buildRawCandidates() {
         candidates.push({
             id: `streak_${ts.id}`,
             streak_count: ts.streak_length,
+            aimed_sport: ts.market.sport.slug,
             market: { key: marketMeta.key, label: marketMeta.label },
             // Both teams are shown side by side on a streak card, but the
             // streak/prediction is only actually about one of them - the
@@ -782,3 +783,5 @@ const streaksService = {
 };
 
 module.exports = streaksService;
+module.exports.MARKET_MAP = MARKET_MAP;
+module.exports.BINARY_MARKET_OUTCOMES = BINARY_MARKET_OUTCOMES;

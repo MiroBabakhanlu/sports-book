@@ -20,6 +20,7 @@ const route = express.Router();
  *       properties:
  *         id: { type: string, example: 'streak_921' }
  *         streak_count: { type: integer, example: 9 }
+ *         aimed_sport: { type: string, example: 'football', description: 'Sport slug this streak belongs to (see Sport.slug) - lets consumers map/filter by sport, currently always football' }
  *         market:
  *           type: object
  *           properties:
